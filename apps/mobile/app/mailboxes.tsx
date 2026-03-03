@@ -61,6 +61,8 @@ export default function MailboxesScreen(): JSX.Element {
   const connectedProviderParam = normalizeParam(params.provider);
   const connectedProvider = isProvider(connectedProviderParam) ? connectedProviderParam : undefined;
   const [loginHint, setLoginHint] = useState('');
+  const [gmailDebugOutput, setGmailDebugOutput] = useState<string>('');
+  const [gmailDebugMailboxId, setGmailDebugMailboxId] = useState<string | null>(null);
 
   useEffect(() => {
     if (connected) {
@@ -89,9 +91,19 @@ export default function MailboxesScreen(): JSX.Element {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
   });
 
+  const testGmailMutation = useMutation({
+    mutationFn: (mailboxId: string) =>
+      apiPost<Record<string, unknown>>(`/mailboxes/${mailboxId}/gmail/test-last-hour`, {}),
+    onSuccess: (data, mailboxId) => {
+      setGmailDebugMailboxId(mailboxId);
+      setGmailDebugOutput(JSON.stringify(data, null, 2));
+    }
+  });
+
   const mailboxErrorMessage = mailboxes.error instanceof Error ? mailboxes.error.message : null;
   const connectErrorMessage = connectMutation.error instanceof Error ? connectMutation.error.message : null;
   const backfillErrorMessage = backfillMutation.error instanceof Error ? backfillMutation.error.message : null;
+  const gmailTestErrorMessage = testGmailMutation.error instanceof Error ? testGmailMutation.error.message : null;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -155,13 +167,25 @@ export default function MailboxesScreen(): JSX.Element {
               </Text>
             </View>
 
-            <Pressable
-              style={[styles.backfillButton, backfillMutation.isPending ? styles.disabled : null]}
-              onPress={() => backfillMutation.mutate(mailbox.id)}
-              disabled={backfillMutation.isPending}
-            >
-              <Text style={styles.backfillButtonText}>Backfill</Text>
-            </Pressable>
+            <View style={styles.mailboxActions}>
+              <Pressable
+                style={[styles.backfillButton, backfillMutation.isPending ? styles.disabled : null]}
+                onPress={() => backfillMutation.mutate(mailbox.id)}
+                disabled={backfillMutation.isPending}
+              >
+                <Text style={styles.backfillButtonText}>Backfill</Text>
+              </Pressable>
+
+              {mailbox.provider === 'gmail' ? (
+                <Pressable
+                  style={[styles.testButton, testGmailMutation.isPending ? styles.disabled : null]}
+                  onPress={() => testGmailMutation.mutate(mailbox.id)}
+                  disabled={testGmailMutation.isPending}
+                >
+                  <Text style={styles.testButtonText}>Test Gmail</Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
         ))}
 
@@ -172,7 +196,18 @@ export default function MailboxesScreen(): JSX.Element {
 
       {connectErrorMessage ? <Text style={styles.error}>{connectErrorMessage}</Text> : null}
       {backfillErrorMessage ? <Text style={styles.error}>{backfillErrorMessage}</Text> : null}
+      {gmailTestErrorMessage ? <Text style={styles.error}>{gmailTestErrorMessage}</Text> : null}
       {backfillMutation.isSuccess ? <Text style={styles.successBody}>Backfill job queued.</Text> : null}
+
+      {gmailDebugOutput ? (
+        <Card tone={mode}>
+          <Text style={styles.sectionTitle}>Gmail API Result (Last Hour)</Text>
+          {gmailDebugMailboxId ? <Text style={styles.meta}>Mailbox: {gmailDebugMailboxId}</Text> : null}
+          <Text selectable style={styles.debugOutput}>
+            {gmailDebugOutput}
+          </Text>
+        </Card>
+      ) : null}
     </ScrollView>
   );
 }
@@ -255,6 +290,9 @@ function createStyles(colors: TabThemeColors) {
     mailboxDetails: {
       flex: 1
     },
+    mailboxActions: {
+      gap: 8
+    },
     mailboxPrimary: {
       color: colors.text,
       fontSize: 14,
@@ -278,6 +316,19 @@ function createStyles(colors: TabThemeColors) {
       fontWeight: '700',
       fontSize: 12
     },
+    testButton: {
+      backgroundColor: '#188038',
+      borderColor: '#188038',
+      borderWidth: 1,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10
+    },
+    testButtonText: {
+      color: colors.white,
+      fontWeight: '700',
+      fontSize: 12
+    },
     disabled: {
       opacity: 0.6
     },
@@ -293,6 +344,12 @@ function createStyles(colors: TabThemeColors) {
     successBody: {
       color: colors.textSecondary,
       marginTop: 4
+    },
+    debugOutput: {
+      marginTop: spacing.sm,
+      color: colors.text,
+      fontSize: 12,
+      lineHeight: 18
     }
   });
 }

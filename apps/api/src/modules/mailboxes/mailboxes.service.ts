@@ -4,6 +4,7 @@ import { Queue } from 'bullmq';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 
+import { RawContentCryptoService } from '../../common/crypto/raw-content-crypto.service';
 import { DatabaseService } from '../../common/db/database.service';
 import { UserContext } from '../../common/auth/user-context';
 import { GmailProviderClient } from './providers/gmail.provider';
@@ -13,6 +14,7 @@ interface OauthStatePayload {
   nonce: string;
   teamId: string;
   userId: string;
+  role: 'AGENT' | 'TEAM_LEAD';
   provider: 'gmail' | 'outlook';
   issued_at: number;
   app_redirect_uri?: string | undefined;
@@ -31,6 +33,16 @@ interface OauthCallbackParams {
   delegated_from?: string | undefined;
 }
 
+interface MailboxAuthRow {
+  id: string;
+  provider: 'gmail' | 'outlook';
+  email_address: string;
+  oauth_access_token: Buffer | null;
+  oauth_refresh_token: Buffer | null;
+  oauth_token_expires_at: string | null;
+  oauth_scope: string | null;
+}
+
 @Injectable()
 export class MailboxesService implements OnModuleDestroy {
   private readonly queue: Queue;
@@ -38,6 +50,7 @@ export class MailboxesService implements OnModuleDestroy {
   constructor(
     private readonly databaseService: DatabaseService,
     private readonly configService: ConfigService,
+    private readonly rawContentCryptoService: RawContentCryptoService,
     private readonly gmailProviderClient: GmailProviderClient,
     private readonly outlookProviderClient: OutlookProviderClient
   ) {
@@ -69,6 +82,7 @@ export class MailboxesService implements OnModuleDestroy {
       nonce: uuidv4(),
       teamId: user.teamId,
       userId: user.userId,
+      role: user.role,
       provider,
       issued_at: Date.now(),
       app_redirect_uri: validatedAppRedirectUri
@@ -91,50 +105,90 @@ export class MailboxesService implements OnModuleDestroy {
     }
 
     const decoded = this.decodeOauthState(query.state, provider);
-    const providerEmail =
-      provider === 'gmail'
-        ? await this.gmailProviderClient.exchangeCodeForEmail(query.code)
-        : await this.outlookProviderClient.exchangeCodeForEmail(query.code);
+    let gmailAuthData: Awaited<ReturnType<GmailProviderClient['exchangeCodeForMailboxData']>> | null = null;
+    let providerEmail: string;
+    if (provider === 'gmail') {
+      gmailAuthData = await this.gmailProviderClient.exchangeCodeForMailboxData(query.code);
+      providerEmail = gmailAuthData.email;
+    } else {
+      providerEmail = await this.outlookProviderClient.exchangeCodeForEmail(query.code);
+    }
 
     const emailAddress = (query.email_address ?? providerEmail).toLowerCase();
     const mailboxType = this.validateMailboxType(query.mailbox_type);
     const delegatedFrom = query.delegated_from ?? null;
+    const encryptedAccessToken = gmailAuthData?.accessToken
+      ? this.rawContentCryptoService.encrypt(gmailAuthData.accessToken)
+      : null;
+    const encryptedRefreshToken = gmailAuthData?.refreshToken
+      ? this.rawContentCryptoService.encrypt(gmailAuthData.refreshToken)
+      : null;
+    const accessTokenExpiresAt = gmailAuthData?.accessTokenExpiresAt ?? null;
+    const oauthScope = gmailAuthData?.scope ?? null;
 
     let mailboxConnectionId = uuidv4();
-    await this.databaseService.withSystemTransaction(async (client) => {
-      const userResult = await client.query(
-        `SELECT id
-         FROM "User"
-         WHERE id = $1
-           AND team_id = $2
-         LIMIT 1`,
-        [decoded.userId, decoded.teamId]
-      );
+    await this.databaseService.withUserTransaction(
+      {
+        userId: decoded.userId,
+        teamId: decoded.teamId,
+        role: decoded.role
+      },
+      async (client) => {
+        const userResult = await client.query(
+          `SELECT id
+           FROM "User"
+           WHERE id = $1
+             AND team_id = $2
+           LIMIT 1`,
+          [decoded.userId, decoded.teamId]
+        );
 
-      if (!userResult.rowCount || !userResult.rows[0]) {
-        throw new NotFoundException('User for OAuth state no longer exists');
+        if (!userResult.rowCount || !userResult.rows[0]) {
+          throw new NotFoundException('User for OAuth state no longer exists');
+        }
+
+        const connectionResult = await client.query(
+          `INSERT INTO "MailboxConnection" (
+            id,
+            user_id,
+            provider,
+            email_address,
+            mailbox_type,
+            delegated_from,
+            oauth_access_token,
+            oauth_refresh_token,
+            oauth_token_expires_at,
+            oauth_scope,
+            status,
+            created_at,
+            updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active', now(), now())
+          ON CONFLICT (user_id, provider, email_address, mailbox_type, delegated_from)
+          DO UPDATE SET
+            status = 'active',
+            oauth_access_token = COALESCE(EXCLUDED.oauth_access_token, "MailboxConnection".oauth_access_token),
+            oauth_refresh_token = COALESCE(EXCLUDED.oauth_refresh_token, "MailboxConnection".oauth_refresh_token),
+            oauth_token_expires_at = COALESCE(EXCLUDED.oauth_token_expires_at, "MailboxConnection".oauth_token_expires_at),
+            oauth_scope = COALESCE(EXCLUDED.oauth_scope, "MailboxConnection".oauth_scope),
+            updated_at = now()
+          RETURNING id`,
+          [
+            mailboxConnectionId,
+            decoded.userId,
+            provider,
+            emailAddress,
+            mailboxType,
+            delegatedFrom,
+            encryptedAccessToken,
+            encryptedRefreshToken,
+            accessTokenExpiresAt,
+            oauthScope
+          ]
+        );
+
+        mailboxConnectionId = connectionResult.rows[0].id as string;
       }
-
-      const connectionResult = await client.query(
-        `INSERT INTO "MailboxConnection" (
-          id,
-          user_id,
-          provider,
-          email_address,
-          mailbox_type,
-          delegated_from,
-          status,
-          created_at,
-          updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'active', now(), now())
-        ON CONFLICT (user_id, provider, email_address, mailbox_type, delegated_from)
-        DO UPDATE SET status = 'active', updated_at = now()
-        RETURNING id`,
-        [mailboxConnectionId, decoded.userId, provider, emailAddress, mailboxType, delegatedFrom]
-      );
-
-      mailboxConnectionId = connectionResult.rows[0].id as string;
-    });
+    );
 
     const result: { connected: true; mailbox_connection_id: string; redirect_url?: string | undefined } = {
       connected: true,
@@ -184,6 +238,109 @@ export class MailboxesService implements OnModuleDestroy {
     return { queued: true, mailbox_id: mailboxId };
   }
 
+  async testGmailLastHour(user: UserContext, mailboxId: string): Promise<Record<string, unknown>> {
+    const mailbox = await this.getMailboxAuthRow(user, mailboxId);
+    if (mailbox.provider !== 'gmail') {
+      throw new BadRequestException('Mailbox provider must be gmail for this test endpoint');
+    }
+
+    const refreshToken = this.decryptToken(mailbox.oauth_refresh_token);
+    let accessToken = this.decryptToken(mailbox.oauth_access_token);
+    let accessTokenExpiresAt = mailbox.oauth_token_expires_at;
+    let tokenRefreshed = false;
+
+    if (!accessToken || this.isAccessTokenStale(mailbox.oauth_token_expires_at)) {
+      if (!refreshToken) {
+        throw new BadRequestException(
+          'No Gmail refresh token available. Reconnect Gmail with consent to grant offline access.'
+        );
+      }
+
+      const refreshed = await this.gmailProviderClient.refreshAccessToken(refreshToken);
+      accessToken = refreshed.accessToken;
+      accessTokenExpiresAt = refreshed.accessTokenExpiresAt?.toISOString() ?? null;
+      tokenRefreshed = true;
+      await this.persistMailboxAccessToken(user, mailboxId, accessToken, refreshed.accessTokenExpiresAt, refreshed.scope);
+    }
+
+    if (!accessToken) {
+      throw new BadRequestException('No Gmail access token available for mailbox');
+    }
+
+    const gmailResponse = await this.gmailProviderClient.fetchRecentInboxDebug(accessToken, 10);
+    return {
+      mailbox_connection_id: mailbox.id,
+      provider: mailbox.provider,
+      email_address: mailbox.email_address,
+      queried_window: 'last_hour',
+      token_refreshed: tokenRefreshed,
+      token_expires_at: accessTokenExpiresAt,
+      gmail_response: gmailResponse
+    };
+  }
+
+  private async getMailboxAuthRow(user: UserContext, mailboxId: string): Promise<MailboxAuthRow> {
+    return this.databaseService.withUserTransaction(user, async (client) => {
+      const result = await client.query<MailboxAuthRow>(
+        `SELECT
+          id,
+          provider,
+          email_address,
+          oauth_access_token,
+          oauth_refresh_token,
+          oauth_token_expires_at,
+          oauth_scope
+         FROM "MailboxConnection"
+         WHERE id = $1
+         LIMIT 1`,
+        [mailboxId]
+      );
+
+      if (!result.rowCount || !result.rows[0]) {
+        throw new NotFoundException('Mailbox not found');
+      }
+
+      return result.rows[0];
+    });
+  }
+
+  private async persistMailboxAccessToken(
+    user: UserContext,
+    mailboxId: string,
+    accessToken: string,
+    expiresAt: Date | undefined,
+    scope: string | undefined
+  ): Promise<void> {
+    await this.databaseService.withUserTransaction(user, async (client) => {
+      await client.query(
+        `UPDATE "MailboxConnection"
+         SET oauth_access_token = $2,
+             oauth_token_expires_at = $3,
+             oauth_scope = COALESCE($4, oauth_scope),
+             updated_at = now()
+         WHERE id = $1`,
+        [mailboxId, this.rawContentCryptoService.encrypt(accessToken), expiresAt ?? null, scope ?? null]
+      );
+    });
+  }
+
+  private decryptToken(ciphertext: Buffer | null): string | null {
+    return this.rawContentCryptoService.decrypt(ciphertext);
+  }
+
+  private isAccessTokenStale(expiresAtIso: string | null): boolean {
+    if (!expiresAtIso) {
+      return true;
+    }
+
+    const expiresAtMs = Date.parse(expiresAtIso);
+    if (Number.isNaN(expiresAtMs)) {
+      return true;
+    }
+
+    return expiresAtMs <= Date.now() + 30_000;
+  }
+
   private encodeOauthState(payload: OauthStatePayload): string {
     const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const signature = createHmac('sha256', this.getStateSecret()).update(encodedPayload).digest('base64url');
@@ -217,6 +374,10 @@ export class MailboxesService implements OnModuleDestroy {
 
     if (decoded.provider !== provider) {
       throw new NotFoundException('OAuth provider mismatch');
+    }
+
+    if (decoded.role !== 'AGENT' && decoded.role !== 'TEAM_LEAD') {
+      decoded.role = 'AGENT';
     }
 
     const ageMs = Date.now() - decoded.issued_at;

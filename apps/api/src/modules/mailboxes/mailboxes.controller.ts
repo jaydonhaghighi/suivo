@@ -92,4 +92,12 @@ export class MailboxesController {
   async backfill(@CurrentUser() user: UserContext, @Param('id') mailboxId: string): Promise<{ queued: true; mailbox_id: string }> {
     return this.mailboxesService.enqueueBackfill(user, mailboxId);
   }
+
+  @Post(':id/gmail/test-last-hour')
+  async testGmailLastHour(
+    @CurrentUser() user: UserContext,
+    @Param('id') mailboxId: string
+  ): Promise<Record<string, unknown>> {
+    return this.mailboxesService.testGmailLastHour(user, mailboxId);
+  }
 }

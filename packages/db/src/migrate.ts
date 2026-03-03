@@ -128,5 +128,21 @@ async function alreadyApplied(client: Client, filename: string): Promise<boolean
     return Boolean(check.rowCount);
   }
 
+  if (filename.startsWith('008_')) {
+    const check = await client.query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'MailboxConnection'
+         AND column_name IN (
+           'oauth_access_token',
+           'oauth_refresh_token',
+           'oauth_token_expires_at',
+           'oauth_scope'
+         )`
+    );
+    return Number(check.rows[0]?.count ?? 0) === 4;
+  }
+
   return false;
 }
