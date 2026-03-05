@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - development
+      - 'dev/**'
   pull_request:
 
 jobs:
@@ -49,8 +52,20 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile=false
 
+      - name: Prepare env files
+        run: |
+          cp .env.example .env
+          cp apps/mobile/.env.example apps/mobile/.env
+          cp apps/web-admin/.env.example apps/web-admin/.env
+
+      - name: Environment contract
+        run: pnpm env:check
+
       - name: Run migrations
         run: pnpm db:migrate
+
+      - name: Database doctor
+        run: pnpm db:doctor
 
       - name: Typecheck
         run: pnpm typecheck
@@ -60,3 +75,6 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Build
+        run: pnpm build

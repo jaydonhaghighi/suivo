@@ -1,6 +1,6 @@
 # Messaging-First Follow-Up Execution Platform (MVP)
 
-Production-focused monorepo for a privacy-first, messaging-first real estate execution platform.
+Monorepo for a privacy-first, messaging-first real estate execution platform.
 
 ## Stack
 
@@ -28,24 +28,110 @@ docs/
   api/
 ```
 
-## Quick Start
+## Zero-Drift Dev Workflow
 
-1. Install dependencies:
-   ```bash
-   pnpm install
-   ```
-2. Copy env templates:
-   ```bash
-   cp .env.example .env
-   ```
-3. Run database migrations:
-   ```bash
-   pnpm db:migrate
-   ```
-4. Start local development:
-   ```bash
-   pnpm dev
-   ```
+### One-time bootstrap
+
+```bash
+pnpm setup
+```
+
+`pnpm setup` performs:
+
+1. tool checks (`node`, `pnpm`, `docker`, `gcloud`)
+2. `pnpm gcp:check`
+3. `pnpm env:pull`
+4. `pnpm env:check`
+5. `pnpm db:doctor`
+6. `pnpm infra:up`
+
+### Daily workflow
+
+```bash
+pnpm env:pull
+pnpm db:doctor
+pnpm dev
+```
+
+`pnpm dev` runs:
+
+1. DB drift check (`db:doctor`)
+2. backend infra boot (`cloud-sql-proxy`, `redis`, `api`, `worker`) in Docker
+3. host UI runtime (`web-admin`, `iOS simulator mobile`)
+
+### Useful commands
+
+- `pnpm infra:up` - start Cloud SQL proxy + Redis + API + Worker
+- `pnpm infra:down` - stop backend containers
+- `pnpm infra:logs` - follow backend container logs
+- `pnpm dev:ui` - run only web-admin + mobile on host
+- `pnpm env:pull` - sync `.env` files from GCP Secret Manager
+- `pnpm env:check` - validate environment contracts
+- `pnpm gcp:check` - validate gcloud project and auth
+- `pnpm db:doctor` - validate migration history and checksums
+- `pnpm db:migrate:shared` - sanctioned migration command for shared dev DB
+- `pnpm checks:all` - run all local gate checks (GCP + env + DB + fast lint/type/test)
+- `pnpm doctor` - alias for `pnpm checks:all`
+
+## GCP Secrets and Auth
+
+### Secret names (canonical)
+
+- `mvp-dev-api-env` -> `.env`
+- `mvp-dev-mobile-env` -> `apps/mobile/.env`
+- `mvp-dev-web-env` -> `apps/web-admin/.env`
+
+### Required IAM roles for each dev
+
+- `Secret Manager Secret Accessor`
+- `Cloud SQL Client`
+
+### Auth method
+
+Use gcloud user auth (no local service-account key files):
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+gcloud config set project "$(cat config/gcp/project-id)"
+```
+
+## Shared DB Runbook
+
+### When schema changed
+
+1. Dev A opens PR with migration SQL.
+2. After merge, Dev A runs `pnpm db:migrate:shared`.
+3. Dev A posts migration confirmation in team channel (migration filename + timestamp).
+4. Dev B pulls latest and runs `pnpm db:doctor`.
+5. Dev B should see `doctor passed`; if not, investigate before coding.
+
+### Secrets rotated
+
+1. Rotate secret values in GCP Secret Manager.
+2. Both devs run `pnpm env:pull`.
+3. Both devs run `pnpm env:check`.
+
+## Git and CI Guardrails
+
+- Local pre-push hook (`.husky/pre-push`) runs:
+  - `pnpm checks:all`
+- Hooks are installed by `pnpm setup` via `pnpm hooks:install`.
+- CI runs on:
+  - every pull request
+  - pushes to `main`, `development`, and `dev/**`
+- CI validates:
+  - env contracts
+  - migrations + DB doctor
+  - typecheck, lint, test, build
+
+## Branch protection (manual GitHub setting)
+
+Apply in GitHub repository settings:
+
+1. Require status checks to pass before merging.
+2. Require branches to be up to date before merging.
+3. Disable force pushes on shared integration branches.
 
 ## Security Model
 
@@ -71,13 +157,3 @@ docs/
 - `GET|PUT /v1/team/rescue-sequences`
 - `GET /v1/team/sla-dashboard`
 - `PUT /v1/team/rules`
-
-## Monorepo Commands
-
-- `pnpm dev` - run all dev servers
-- `pnpm build` - build all packages/apps
-- `pnpm lint` - lint all packages/apps
-- `pnpm test` - run unit tests
-- `pnpm db:migrate` - run DB migrations
-- `pnpm db:seed` - seed local database
-- `pnpm db:seed:admin` - seed Team Lead admin routing queues (intake/assigned/reassign)

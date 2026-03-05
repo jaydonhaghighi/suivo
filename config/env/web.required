@@ -1,0 +1,5 @@
+# Web admin environment contract
+API_BASE_URL
+WEB_USER_ID
+WEB_TEAM_ID
+WEB_ROLE

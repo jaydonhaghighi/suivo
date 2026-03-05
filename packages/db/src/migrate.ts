@@ -1,10 +1,80 @@
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { Client } from 'pg';
+
 import { loadEnv } from './load-env';
 
 const migrationsDir = join(__dirname, '..', 'migrations');
+const migrationTable = 'schema_migrations';
+const migrationLockId = 834276451;
+
+interface MigrationFile {
+  filename: string;
+  sql: string;
+  checksum: string;
+}
+
+interface AppliedMigrationRow {
+  filename: string;
+  checksum: string;
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function getMigrationFiles(): MigrationFile[] {
+  return readdirSync(migrationsDir)
+    .filter((file) => file.endsWith('.sql'))
+    .sort()
+    .map((filename) => {
+      const sql = readFileSync(join(migrationsDir, filename), 'utf8');
+      return {
+        filename,
+        sql,
+        checksum: sha256(sql)
+      };
+    });
+}
+
+async function ensureMigrationTable(client: Client): Promise<void> {
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS "${migrationTable}" (
+      filename TEXT PRIMARY KEY,
+      checksum TEXT NOT NULL,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`
+  );
+}
+
+async function acquireMigrationLock(client: Client): Promise<void> {
+  await client.query('SELECT pg_advisory_lock($1)', [migrationLockId]);
+}
+
+async function releaseMigrationLock(client: Client): Promise<void> {
+  await client.query('SELECT pg_advisory_unlock($1)', [migrationLockId]);
+}
+
+async function getAppliedMigrations(client: Client): Promise<Map<string, AppliedMigrationRow>> {
+  const rows = await client.query<AppliedMigrationRow>(
+    `SELECT filename, checksum
+     FROM "${migrationTable}"`
+  );
+
+  return new Map(rows.rows.map((row) => [row.filename, row]));
+}
+
+async function recordAppliedMigration(client: Client, filename: string, checksum: string): Promise<void> {
+  await client.query(
+    `INSERT INTO "${migrationTable}" (filename, checksum)
+     VALUES ($1, $2)
+     ON CONFLICT (filename) DO UPDATE
+     SET checksum = EXCLUDED.checksum`,
+    [filename, checksum]
+  );
+}
 
 async function main(): Promise<void> {
   loadEnv();
@@ -14,28 +84,53 @@ async function main(): Promise<void> {
     throw new Error('DATABASE_URL is required');
   }
 
+  const mode = process.env.MVP_DB_MIGRATION_MODE ?? 'local';
+
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
 
+  let lockAcquired = false;
+
   try {
-    const files = readdirSync(migrationsDir)
-      .filter((file) => file.endsWith('.sql'))
-      .sort();
+    await ensureMigrationTable(client);
+    await acquireMigrationLock(client);
+    lockAcquired = true;
+
+    process.stdout.write(`Migration mode: ${mode}\n`);
+
+    const files = getMigrationFiles();
+    const applied = await getAppliedMigrations(client);
 
     for (const file of files) {
-      const skip = await alreadyApplied(client, file);
-      if (skip) {
-        process.stdout.write(`Skipping migration ${file} (already applied)\n`);
+      const existing = applied.get(file.filename);
+      if (existing) {
+        if (existing.checksum !== file.checksum) {
+          throw new Error(
+            `Checksum mismatch for ${file.filename}. Expected ${existing.checksum} in DB, got ${file.checksum} locally.`
+          );
+        }
+
+        process.stdout.write(`Skipping migration ${file.filename} (already applied)\n`);
         continue;
       }
 
-      const sql = readFileSync(join(migrationsDir, file), 'utf8');
-      process.stdout.write(`Applying migration ${file}\n`);
-      await client.query(sql);
+      const legacy = await alreadyAppliedLegacy(client, file.filename);
+      if (legacy) {
+        await recordAppliedMigration(client, file.filename, file.checksum);
+        process.stdout.write(`Recorded legacy migration ${file.filename}\n`);
+        continue;
+      }
+
+      process.stdout.write(`Applying migration ${file.filename}\n`);
+      await client.query(file.sql);
+      await recordAppliedMigration(client, file.filename, file.checksum);
     }
 
     process.stdout.write('Migrations applied successfully\n');
   } finally {
+    if (lockAcquired) {
+      await releaseMigrationLock(client);
+    }
     await client.end();
   }
 }
@@ -45,7 +140,7 @@ main().catch((error) => {
   process.exit(1);
 });
 
-async function alreadyApplied(client: Client, filename: string): Promise<boolean> {
+async function alreadyAppliedLegacy(client: Client, filename: string): Promise<boolean> {
   if (filename.startsWith('001_')) {
     const check = await client.query(
       `SELECT 1

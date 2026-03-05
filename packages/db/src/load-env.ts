@@ -6,10 +6,8 @@ import { config as dotenvConfig } from 'dotenv';
 const candidateEnvFiles = [
   '.env',
   '.env.local',
-  '.env.example',
   '../../.env',
-  '../../.env.local',
-  '../../.env.example'
+  '../../.env.local'
 ];
 
 export function loadEnv(): void {
