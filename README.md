@@ -1,6 +1,6 @@
-# Messaging-First Follow-Up Execution Platform (MVP)
+# Suivo
 
-Monorepo for a privacy-first, messaging-first real estate execution platform.
+Monorepo for Suivo, a privacy-first real estate execution platform.
 
 ## Stack
 

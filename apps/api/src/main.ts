@@ -60,7 +60,7 @@ async function bootstrap(): Promise<void> {
 
   const config = new DocumentBuilder()
     .setTitle('Suivo API')
-    .setDescription('Messaging-first follow-up execution platform API')
+    .setDescription('Suivo follow-up execution platform API')
     .setVersion('1.0.0')
     .addBearerAuth()
     .build();
