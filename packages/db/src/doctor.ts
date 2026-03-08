@@ -26,15 +26,12 @@ function buildConnectionHelp(databaseUrl: string, error: unknown): string {
 
     details.push(`Target: host=${host} port=${port} db=${database}`);
 
-    if (host === '127.0.0.1' && port === '6432') {
+    if ((host === '127.0.0.1' || host === 'localhost') && (port === '6432' || port === '5432')) {
       details.push(
-        'This target expects Cloud SQL proxy on localhost:6432. Run `pnpm infra:up:deps` first.'
+        'This target expects local Postgres for dev. Run `pnpm infra:up:deps` first.'
       );
       details.push(
-        'If the proxy is running, inspect `cloud-sql-proxy` logs for auth/instance errors.'
-      );
-      details.push(
-        'Common issue: CLOUD_SQL_INSTANCE_CONNECTION_NAME must use region (e.g. northamerica-northeast1), not zone (northamerica-northeast1-c).'
+        'If you are using Cloud SQL Proxy mode instead, run `pnpm infra:up:prod:deps` and check `pnpm infra:logs:prod`.'
       );
     }
   } catch {

@@ -55,16 +55,31 @@ pnpm dev
 
 `pnpm dev` runs:
 
-1. DB drift check (`db:doctor`)
-2. backend infra boot (`cloud-sql-proxy`, `redis`, `api`, `worker`) in Docker
-3. host UI runtime (`web-admin`, `iOS simulator mobile`)
+1. local DB migrations (`db:migrate:dev`) + drift check (`db:doctor:dev`)
+2. backend infra boot (`postgres`, `redis`, `api`, `worker`) in Docker
+3. host UI runtime (`web-admin`, mobile prompt: simulator or physical device)
+
+`pnpm prod` runs:
+
+1. Cloud SQL proxy prerequisite checks
+2. DB drift check (`db:doctor`)
+3. backend infra boot (`cloud-sql-proxy`, `redis`, `api`, `worker`) in Docker
+4. host UI runtime (`web-admin`, mobile prompt: simulator or physical device)
 
 ### Useful commands
 
-- `pnpm infra:up` - start Cloud SQL proxy + Redis + API + Worker
+- `pnpm infra:up` - start local Postgres + Redis + API + Worker
 - `pnpm infra:down` - stop backend containers
 - `pnpm infra:logs` - follow backend container logs
-- `pnpm dev:ui` - run only web-admin + mobile on host
+- `pnpm infra:up:prod` - start Cloud SQL proxy + Redis + API + Worker
+- `pnpm infra:down:prod` - stop prod-mode backend containers
+- `pnpm infra:logs:prod` - follow prod-mode container logs
+- `pnpm dev:ui` - same as `pnpm dev` (local DB/API/worker + host UI, interactive mobile target prompt)
+- `pnpm dev:ui:simulator` - same as `pnpm dev` but force iOS simulator mobile
+- `pnpm dev:ui:device` - same as `pnpm dev` but force physical-device mobile (Expo Go)
+- `pnpm ui:host` - run only web-admin + mobile on host (infra already running)
+- `pnpm ui:host:simulator` - run only host UI, force iOS simulator mobile
+- `pnpm ui:host:device` - run only host UI, force physical-device mobile
 - `pnpm env:pull` - sync `.env` files from GCP Secret Manager
 - `pnpm env:check` - validate environment contracts
 - `pnpm gcp:check` - validate gcloud project and auth

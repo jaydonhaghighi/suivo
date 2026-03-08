@@ -40,7 +40,7 @@ pnpm env:check
 blue "Checking database migration drift..."
 pnpm db:doctor
 
-blue "Starting backend infra (Cloud SQL proxy + Redis + API + Worker)..."
+blue "Starting backend infra (local Postgres + Redis + API + Worker)..."
 pnpm infra:up
 
 green ""
@@ -48,4 +48,5 @@ green "=== Setup complete ==="
 green ""
 green "Next steps:"
 green "  1) Run 'pnpm dev' for daily workflow (doctor + infra + UI)."
-green "  2) Or run 'pnpm dev:ui' if infra is already running."
+green "  2) Run 'pnpm prod' when you need Cloud SQL proxy mode."
+green "  3) Or run 'pnpm ui:host' if infra is already running."

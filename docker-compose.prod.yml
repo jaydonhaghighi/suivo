@@ -1,19 +1,16 @@
 services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: messaging_mvp
-    ports:
-      - "5432:5432"
+  cloud-sql-proxy:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.3
+    user: "0:0"
+    command:
+      - "--credentials-file=/gcloud/application_default_credentials.json"
+      - "--address=0.0.0.0"
+      - "--port=5432"
+      - "${CLOUD_SQL_INSTANCE_CONNECTION_NAME}"
     volumes:
-      - pgdata-dev:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d messaging_mvp"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
+      - "${HOME}/.config/gcloud/application_default_credentials.json:/gcloud/application_default_credentials.json:ro"
+    ports:
+      - "6432:5432"
     restart: unless-stopped
 
   redis:
@@ -29,7 +26,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/messaging_mvp"
+      DATABASE_URL: "${DOCKER_DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:6432/messaging_mvp}"
       REDIS_URL: "redis://redis:6379"
     ports:
       - "3001:3001"
@@ -37,10 +34,8 @@ services:
       - .:/workspace
       - /workspace/node_modules
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
+      - cloud-sql-proxy
+      - redis
     restart: unless-stopped
 
   worker:
@@ -50,17 +45,12 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/messaging_mvp"
+      DATABASE_URL: "${DOCKER_DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:6432/messaging_mvp}"
       REDIS_URL: "redis://redis:6379"
     volumes:
       - .:/workspace
       - /workspace/node_modules
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
+      - cloud-sql-proxy
+      - redis
     restart: unless-stopped
-
-volumes:
-  pgdata-dev:
