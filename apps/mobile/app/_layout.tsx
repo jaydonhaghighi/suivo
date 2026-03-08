@@ -13,6 +13,7 @@ import { TabThemeProvider, useTabTheme } from '../lib/tab-theme';
 const queryClient = new QueryClient();
 
 const clerkPublishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
+const clerkJwtTemplate = process.env.EXPO_PUBLIC_CLERK_JWT_TEMPLATE?.trim();
 
 export default function Layout(): JSX.Element {
   return (
@@ -21,8 +22,8 @@ export default function Layout(): JSX.Element {
         <ClerkLoaded>
           <QueryClientProvider client={queryClient}>
             <TabThemeProvider>
+              <TokenSync />
               <AuthGate>
-                <TokenSync />
                 <RootStack />
               </AuthGate>
             </TabThemeProvider>
@@ -37,7 +38,16 @@ function TokenSync(): null {
   const { getToken } = useAuth();
 
   useEffect(() => {
-    setTokenProvider(() => getToken());
+    setTokenProvider(async () => {
+      if (!clerkJwtTemplate) {
+        return null;
+      }
+
+      return getToken({
+        template: clerkJwtTemplate,
+        skipCache: true
+      });
+    });
   }, [getToken]);
 
   return null;

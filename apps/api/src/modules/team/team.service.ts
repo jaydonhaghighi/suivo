@@ -10,6 +10,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 
+import { TeamCodeService } from '../../common/auth/team-code.service';
 import { DatabaseService } from '../../common/db/database.service';
 import { UserContext } from '../../common/auth/user-context';
 
@@ -35,6 +36,12 @@ interface AssignableAgentRow {
   language: string;
 }
 
+interface TeamJoinCodeRow {
+  join_code_hash: string | null;
+  join_code_encrypted: Buffer | null;
+  join_code_generated_at: string | null;
+}
+
 const assignBrokerTaskSchema = z.object({
   assignee_user_id: z.string().uuid(),
   reason: z.string().min(1).max(500)
@@ -47,7 +54,10 @@ const teamRuleUpdateSchema = staleRuleSchema
 
 @Injectable()
 export class TeamService {
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly databaseService: DatabaseService,
+    private readonly teamCodeService: TeamCodeService
+  ) {}
 
   async getTemplates(user: UserContext): Promise<Record<string, unknown>[]> {
     return this.databaseService.withUserTransaction(user, async (client) => {
@@ -231,6 +241,60 @@ export class TeamService {
         sla_rules: slaRules,
         escalation_rules: escalationRules
       };
+    });
+  }
+
+  async getTeamJoinCode(user: UserContext): Promise<{ team_code: string; generated_at: string }> {
+    return this.databaseService.withUserTransaction(user, async (client) => {
+      const teamResult = await client.query<TeamJoinCodeRow>(
+        `SELECT join_code_hash, join_code_encrypted, join_code_generated_at
+         FROM "Team"
+         WHERE id = $1
+         FOR UPDATE`,
+        [user.teamId]
+      );
+
+      if (!teamResult.rowCount || !teamResult.rows[0]) {
+        throw new NotFoundException('Team not found');
+      }
+
+      const existingCode = this.teamCodeService.decrypt(teamResult.rows[0].join_code_encrypted);
+      if (existingCode && teamResult.rows[0].join_code_generated_at) {
+        return {
+          team_code: existingCode,
+          generated_at: teamResult.rows[0].join_code_generated_at
+        };
+      }
+
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const generatedCode = this.teamCodeService.generate();
+        try {
+          const updated = await client.query<TeamJoinCodeRow>(
+            `UPDATE "Team"
+             SET join_code_hash = $2,
+                 join_code_encrypted = $3,
+                 join_code_generated_at = now()
+             WHERE id = $1
+               AND (join_code_hash IS NULL OR join_code_encrypted IS NULL OR join_code_generated_at IS NULL)
+             RETURNING join_code_hash, join_code_encrypted, join_code_generated_at`,
+            [user.teamId, generatedCode.hash, generatedCode.encrypted]
+          );
+
+          if (updated.rows[0]) {
+            return {
+              team_code: generatedCode.code,
+              generated_at: updated.rows[0].join_code_generated_at as string
+            };
+          }
+        } catch (error: unknown) {
+          if (this.isUniqueViolation(error, 'ux_team_join_code_hash')) {
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      throw new Error('Unable to generate unique team code');
     });
   }
 
@@ -570,6 +634,15 @@ export class TeamService {
         escalation_rules: nextEscalationRules
       };
     });
+  }
+
+  private isUniqueViolation(error: unknown, constraint: string): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const pgError = error as { code?: string; constraint?: string };
+    return pgError.code === '23505' && pgError.constraint === constraint;
   }
 
 }

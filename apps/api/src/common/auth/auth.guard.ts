@@ -6,26 +6,20 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
-import { createRemoteJWKSet, jwtVerify, JWTVerifyResult } from 'jose';
 
 import { DatabaseService } from '../db/database.service';
+import { JwtVerifierService } from './jwt-verifier.service';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { RequestWithUser, UserContext } from './user-context';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
-  private jwks?: ReturnType<typeof createRemoteJWKSet>;
-
   constructor(
     private readonly reflector: Reflector,
     private readonly configService: ConfigService,
-    private readonly databaseService: DatabaseService
-  ) {
-    const jwksUri = this.configService.get<string>('JWT_JWKS_URI');
-    if (jwksUri) {
-      this.jwks = createRemoteJWKSet(new URL(jwksUri));
-    }
-  }
+    private readonly databaseService: DatabaseService,
+    private readonly jwtVerifierService: JwtVerifierService
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -43,13 +37,10 @@ export class AuthGuard implements CanActivate {
     const allowDevHeaderAuth = this.isDevHeaderAuthEnabled();
 
     const authHeader = request.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      request.user = await this.validateJwt(authHeader.slice(7));
-      return true;
-    }
-
     if (authHeader) {
-      throw new UnauthorizedException('Unsupported authorization scheme');
+      const clerkId = await this.jwtVerifierService.getSubjectFromAuthorizationHeader(authHeader);
+      request.user = await this.resolveUser(clerkId);
+      return true;
     }
 
     if (allowDevHeaderAuth) {
@@ -85,44 +76,19 @@ export class AuthGuard implements CanActivate {
     return null;
   }
 
-  private async validateJwt(token: string): Promise<UserContext> {
-    if (!this.jwks) {
-      throw new UnauthorizedException('JWKS not configured');
-    }
-
-    const issuer = this.configService.get<string>('JWT_ISSUER');
-    const audience = this.configService.get<string>('JWT_AUDIENCE');
-    if (!issuer || !audience) {
-      throw new UnauthorizedException('JWT issuer/audience is not configured');
-    }
-
-    const verifyOptions: { issuer: string; audience: string } = {
-      issuer,
-      audience
-    };
-
-    let verified: JWTVerifyResult;
-    try {
-      verified = await jwtVerify(token, this.jwks, verifyOptions);
-    } catch (error) {
-      throw new UnauthorizedException('Invalid bearer token');
-    }
-
-    const subject = verified.payload.sub;
-    if (!subject) {
-      throw new UnauthorizedException('Token missing subject claim');
-    }
-
-    return this.resolveUser(subject);
-  }
-
   private async resolveUser(clerkId: string): Promise<UserContext> {
     const existing = await this.databaseService.query<{
       id: string;
       team_id: string;
       role: 'AGENT' | 'TEAM_LEAD';
     }>(
-      `SELECT id, team_id, role FROM "User" WHERE clerk_id = $1`,
+      `WITH clerk_context AS (
+         SELECT set_config('app.clerk_id', $1, true)
+       )
+       SELECT u.id, u.team_id, u.role
+       FROM clerk_context, "User" u
+       WHERE u.clerk_id = $1
+       LIMIT 1`,
       [clerkId]
     );
 

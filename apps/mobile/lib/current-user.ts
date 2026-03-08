@@ -10,6 +10,7 @@ export type CurrentUser = {
 };
 
 type Role = CurrentUser['role'];
+const UNPROVISIONED_USER_MESSAGE = 'No linked user account found';
 
 function parseRole(value: string | undefined): Role | null {
   if (!value) {
@@ -29,18 +30,22 @@ function getConfiguredDevRole(): Role | null {
   return parseRole(extra.DEV_ROLE) ?? parseRole(process.env.EXPO_PUBLIC_DEV_ROLE);
 }
 
-export function useCurrentUser() {
+export function useCurrentUser(options?: { enabled?: boolean }) {
   const query = useQuery({
     queryKey: ['current-user'],
     queryFn: () => apiGet<CurrentUser>('/users/me'),
+    enabled: options?.enabled ?? true,
     staleTime: 60_000,
     retry: 1
   });
 
   const effectiveRole = query.data?.role ?? getConfiguredDevRole();
+  const isUnprovisioned =
+    query.error instanceof Error && query.error.message.includes(UNPROVISIONED_USER_MESSAGE);
 
   return {
     ...query,
-    effectiveRole
+    effectiveRole,
+    isUnprovisioned
   };
 }

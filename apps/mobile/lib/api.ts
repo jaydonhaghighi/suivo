@@ -121,11 +121,19 @@ async function buildHttpError(response: Response): Promise<Error> {
   try {
     const contentType = response.headers.get('content-type') ?? '';
     if (contentType.includes('application/json')) {
-      const parsed = (await response.json()) as { message?: unknown };
+      const parsed = (await response.json()) as { message?: unknown; error?: unknown; statusCode?: unknown };
       if (typeof parsed.message === 'string') {
         details = parsed.message;
       } else if (Array.isArray(parsed.message)) {
         details = parsed.message.filter((item) => typeof item === 'string').join(', ');
+      } else if (typeof parsed.error === 'string') {
+        details = parsed.error;
+      } else {
+        try {
+          details = JSON.stringify(parsed);
+        } catch (_jsonError) {
+          details = undefined;
+        }
       }
     } else {
       const textBody = await response.text();

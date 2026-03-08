@@ -1,13 +1,20 @@
 import { useClerk, useUser } from '@clerk/clerk-expo';
+import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { Link } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Card } from '../../components/card';
+import { apiGet } from '../../lib/api';
 import { useCurrentUser } from '../../lib/current-user';
 import { spacing } from '../../lib/theme';
 import { TabThemeColors, useTabTheme } from '../../lib/tab-theme';
+
+type TeamJoinCodeResponse = {
+  team_code: string;
+  generated_at: string;
+};
 
 export default function ProfileScreen(): JSX.Element {
   const { colors, mode, setMode } = useTabTheme();
@@ -16,6 +23,11 @@ export default function ProfileScreen(): JSX.Element {
   const { signOut } = useClerk();
   const currentUser = useCurrentUser();
   const isTeamLead = currentUser.effectiveRole === 'TEAM_LEAD';
+  const teamJoinCode = useQuery({
+    queryKey: ['team-join-code'],
+    queryFn: () => apiGet<TeamJoinCodeResponse>('/team/join-code'),
+    enabled: isTeamLead
+  });
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -56,6 +68,28 @@ export default function ProfileScreen(): JSX.Element {
 
         <Text style={styles.rowLabel}>User ID</Text>
         <Text style={styles.code}>{user?.id ?? '—'}</Text>
+
+        {isTeamLead ? (
+          <>
+            <Text style={styles.rowLabel}>Team Join Code</Text>
+            {teamJoinCode.isLoading ? (
+              <Text style={styles.rowValue}>Loading…</Text>
+            ) : teamJoinCode.error instanceof Error ? (
+              <Text style={styles.rowValue}>Unavailable ({teamJoinCode.error.message})</Text>
+            ) : (
+              <Text selectable style={styles.joinCode}>
+                {teamJoinCode.data?.team_code ?? '—'}
+              </Text>
+            )}
+
+            <Text style={styles.rowLabel}>Code Generated</Text>
+            <Text style={styles.rowValue}>
+              {teamJoinCode.data?.generated_at
+                ? new Date(teamJoinCode.data.generated_at).toLocaleString()
+                : '—'}
+            </Text>
+          </>
+        ) : null}
       </Card>
 
       <Card tone={mode}>
@@ -143,6 +177,14 @@ function createStyles(colors: TabThemeColors) {
       color: colors.textSecondary,
       fontFamily: 'Courier',
       fontSize: 12,
+      marginTop: 2
+    },
+    joinCode: {
+      color: colors.text,
+      fontFamily: 'Courier',
+      fontSize: 20,
+      fontWeight: '800',
+      letterSpacing: 1.2,
       marginTop: 2
     },
     modeSwitch: {

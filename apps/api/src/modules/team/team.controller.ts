@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpException,
+  InternalServerErrorException,
+  Param,
+  Post,
+  Put
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { UserContext } from '../../common/auth/user-context';
@@ -8,7 +19,10 @@ import { TeamService } from './team.service';
 @Controller('team')
 @Roles('TEAM_LEAD')
 export class TeamController {
-  constructor(private readonly teamService: TeamService) {}
+  constructor(
+    private readonly teamService: TeamService,
+    private readonly configService: ConfigService
+  ) {}
 
   @Get('templates')
   async getTemplates(@CurrentUser() user: UserContext): Promise<Record<string, unknown>[]> {
@@ -58,6 +72,33 @@ export class TeamController {
   @Get('rules')
   async getRules(@CurrentUser() user: UserContext): Promise<Record<string, unknown>> {
     return this.teamService.getRules(user);
+  }
+
+  @Get('join-code')
+  async getJoinCode(@CurrentUser() user: UserContext): Promise<{ team_code: string; generated_at: string }> {
+    try {
+      return await this.teamService.getTeamJoinCode(user);
+    } catch (error: unknown) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      if (this.configService.get<string>('NODE_ENV') === 'development') {
+        const pgError = error as { message?: string; code?: string; detail?: string; constraint?: string };
+        const details = [
+          pgError.message ? `message=${pgError.message}` : null,
+          pgError.code ? `code=${pgError.code}` : null,
+          pgError.constraint ? `constraint=${pgError.constraint}` : null,
+          pgError.detail ? `detail=${pgError.detail}` : null
+        ]
+          .filter((value) => value !== null)
+          .join(', ');
+
+        throw new InternalServerErrorException(`Join code failed: ${details || 'unknown error'}`);
+      }
+
+      throw new InternalServerErrorException('Join code failed');
+    }
   }
 
   @Get('admin/agents')
