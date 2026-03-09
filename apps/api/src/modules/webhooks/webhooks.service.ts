@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PoolClient } from 'pg';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -6,6 +6,7 @@ import { EscalationRules, escalationRuleSchema } from '@mvp/shared-types';
 
 import { RawContentCryptoService } from '../../common/crypto/raw-content-crypto.service';
 import { DatabaseService } from '../../common/db/database.service';
+import { EmailClassifierService } from '../ai/email-classifier.service';
 import { LeadsService } from '../leads/leads.service';
 
 interface EmailWebhookPayload {
@@ -46,20 +47,58 @@ interface BrokerIntakeSettings {
   phone_number_ids: string[];
 }
 
+interface EmailIngestDbResult {
+  accepted: boolean;
+  deduped: boolean;
+  lead_id?: string | undefined;
+  event_id?: string | undefined;
+  should_classify?: boolean | undefined;
+}
+
+type EmailClassificationStatus = 'not_applicable' | 'queued' | 'completed' | 'failed';
+
+interface IngestEmailOptions {
+  awaitClassification?: boolean | undefined;
+}
+
+export interface EmailIngestResult {
+  accepted: boolean;
+  deduped: boolean;
+  lead_id?: string | undefined;
+  event_id?: string | undefined;
+  classification_status: EmailClassificationStatus;
+}
+
 @Injectable()
 export class WebhooksService {
+  private readonly logger = new Logger(WebhooksService.name);
+
   constructor(
     private readonly configService: ConfigService,
     private readonly databaseService: DatabaseService,
     private readonly leadsService: LeadsService,
-    private readonly rawContentCryptoService: RawContentCryptoService
+    private readonly rawContentCryptoService: RawContentCryptoService,
+    private readonly emailClassifierService: EmailClassifierService
   ) {}
 
   async ingestEmail(
     provider: 'gmail' | 'outlook',
     payload: EmailWebhookPayload
   ): Promise<{ accepted: boolean; deduped: boolean; lead_id?: string }> {
-    return this.databaseService.withSystemTransaction(async (client) => {
+    const detailed = await this.ingestEmailDetailed(provider, payload);
+    return {
+      accepted: detailed.accepted,
+      deduped: detailed.deduped,
+      ...(detailed.lead_id ? { lead_id: detailed.lead_id } : {})
+    };
+  }
+
+  async ingestEmailDetailed(
+    provider: 'gmail' | 'outlook',
+    payload: EmailWebhookPayload,
+    options?: IngestEmailOptions
+  ): Promise<EmailIngestResult> {
+    const ingestResult = await this.databaseService.withSystemTransaction<EmailIngestDbResult>(async (client) => {
       const mailbox = await this.resolveMailbox(client, provider, payload.mailbox_connection_id, payload.mailbox_email);
       if (!mailbox) {
         return { accepted: false, deduped: false };
@@ -126,14 +165,66 @@ export class WebhooksService {
         return { accepted: true, deduped: true, lead_id: lead.id };
       }
 
+      const eventIdValue = insertResult.rows[0]?.id;
+      const eventId = typeof eventIdValue === 'string' ? eventIdValue : undefined;
       if (payload.direction === 'outbound') {
         await this.leadsService.applyTouch(client, lead.id, lead.owner_agent_id);
       } else {
         await this.ensureInboundTask(client, lead.id, lead.owner_agent_id);
       }
 
-      return { accepted: true, deduped: false, lead_id: lead.id };
+      const result: EmailIngestDbResult = {
+        accepted: true,
+        deduped: false,
+        lead_id: lead.id,
+        should_classify: payload.direction === 'inbound'
+      };
+      if (eventId) {
+        result.event_id = eventId;
+      }
+      return result;
     });
+
+    let classificationStatus: EmailClassificationStatus = 'not_applicable';
+    if (
+      ingestResult.accepted
+      && !ingestResult.deduped
+      && ingestResult.should_classify
+      && ingestResult.event_id
+      && ingestResult.lead_id
+    ) {
+      const subject = payload.subject ?? '';
+      const body = payload.body ?? '';
+      const fromEmail = payload.from_email;
+      if (options?.awaitClassification) {
+        const ok = await this.classifyAndPersistEmail(ingestResult.event_id, ingestResult.lead_id, {
+          subject,
+          body,
+          fromEmail
+        });
+        classificationStatus = ok ? 'completed' : 'failed';
+      } else {
+        void this.classifyAndPersistEmail(ingestResult.event_id, ingestResult.lead_id, {
+          subject,
+          body,
+          fromEmail
+        });
+        classificationStatus = 'queued';
+      }
+    }
+
+    const result: EmailIngestResult = {
+      accepted: ingestResult.accepted,
+      deduped: ingestResult.deduped,
+      classification_status: classificationStatus
+    };
+    if (ingestResult.lead_id) {
+      result.lead_id = ingestResult.lead_id;
+    }
+    if (ingestResult.event_id) {
+      result.event_id = ingestResult.event_id;
+    }
+    return result;
   }
 
   async ingestSms(payload: SmsWebhookPayload): Promise<{ accepted: boolean; deduped: boolean; lead_id?: string }> {
@@ -287,6 +378,53 @@ export class WebhooksService {
 
       return { accepted: true, deduped: false, lead_id: lead.id };
     });
+  }
+
+  private async classifyAndPersistEmail(
+    eventId: string,
+    leadId: string,
+    input: { subject: string; body: string; fromEmail: string }
+  ): Promise<boolean> {
+    try {
+      const classification = await this.emailClassifierService.classifyInboundEmail({
+        subject: input.subject,
+        body: input.body,
+        fromEmail: input.fromEmail
+      });
+
+      await this.databaseService.withSystemTransaction(async (client) => {
+        await client.query(
+          `UPDATE "ConversationEvent"
+           SET meta = COALESCE(meta, '{}'::jsonb) || $2::jsonb
+           WHERE id = $1`,
+          [eventId, JSON.stringify({ ai_classification: classification })]
+        );
+
+        await client.query(
+          `UPDATE "DerivedLeadProfile"
+           SET fields_json = COALESCE(fields_json, '{}'::jsonb) || $2::jsonb,
+               updated_at = now()
+           WHERE lead_id = $1`,
+          [
+            leadId,
+            JSON.stringify({
+              last_email_classification: {
+                kind: classification.kind,
+                urgency: classification.urgency,
+                confidence: classification.confidence,
+                needs_human_reply: classification.needs_human_reply,
+                source: classification.source
+              }
+            })
+          ]
+        );
+      });
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      this.logger.warn(`Email classification persistence failed for event ${eventId}: ${message}`);
+      return false;
+    }
   }
 
   private async resolveMailbox(

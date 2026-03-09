@@ -100,7 +100,39 @@ function devAuthHeaders(): Record<string, string> {
   };
 }
 
+function parseBooleanFlag(value: string | undefined): boolean | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+    return true;
+  }
+  if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+    return false;
+  }
+
+  return undefined;
+}
+
+function shouldPreferDevAuthHeaders(devHeaders: Record<string, string>): boolean {
+  const explicit = parseBooleanFlag(devHeaderValue('FORCE_DEV_AUTH'));
+  if (explicit === true) {
+    return Object.keys(devHeaders).length > 0;
+  }
+
+  // Default behavior: prefer Clerk bearer token identity and derive DB user
+  // by clerk_id on the API side. Dev headers are an explicit override only.
+  return false;
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
+  const fallbackHeaders = devAuthHeaders();
+  if (shouldPreferDevAuthHeaders(fallbackHeaders)) {
+    return fallbackHeaders;
+  }
+
   if (_getToken) {
     try {
       const token = await _getToken();
@@ -112,7 +144,6 @@ async function authHeaders(): Promise<Record<string, string>> {
     }
   }
 
-  const fallbackHeaders = devAuthHeaders();
   if (Object.keys(fallbackHeaders).length > 0) {
     return fallbackHeaders;
   }

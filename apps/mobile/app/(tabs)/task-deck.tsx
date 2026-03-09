@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
 import { apiGet, apiPost } from '../../lib/api';
+import { useCurrentUser } from '../../lib/current-user';
 import { spacing } from '../../lib/theme';
 import { TabThemeColors, useTabTheme } from '../../lib/tab-theme';
 
@@ -296,9 +297,10 @@ export default function TaskDeckScreen(): JSX.Element {
   const router = useRouter();
   const qc = useQueryClient();
   const [swipeCount, setSwipeCount] = useState(0);
+  const currentUser = useCurrentUser();
 
   const tasks = useQuery({
-    queryKey: ['task-deck'],
+    queryKey: ['task-deck', currentUser.data?.userId, currentUser.data?.teamId, currentUser.data?.role],
     queryFn: () => apiGet<TaskCard[]>('/task-deck'),
   });
 

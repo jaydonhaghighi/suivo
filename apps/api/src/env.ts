@@ -33,6 +33,9 @@ export const appEnvSchema = z
     OAUTH_STATE_SECRET: emptyToUndefined.optional(),
     INTERNAL_API_TOKEN: emptyToUndefined.optional(),
     APP_REDIRECT_ALLOWLIST: emptyToUndefined.optional(),
+    MAIL_SYNC_NEWER_THAN_HOURS: emptyToUndefined.optional(),
+    MAIL_SYNC_MAX_RESULTS_PER_BOX: emptyToUndefined.optional(),
+    MAIL_SYNC_MAILBOX_LIMIT: emptyToUndefined.optional(),
     ALLOW_DEV_HEADER_AUTH: booleanFromString.default(false)
   })
   .superRefine((config, ctx) => {

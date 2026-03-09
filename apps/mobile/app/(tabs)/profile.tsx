@@ -69,6 +69,15 @@ export default function ProfileScreen(): JSX.Element {
         <Text style={styles.rowLabel}>User ID</Text>
         <Text style={styles.code}>{user?.id ?? '—'}</Text>
 
+        <Text style={styles.rowLabel}>API User ID</Text>
+        <Text selectable style={styles.code}>{currentUser.data?.userId ?? '—'}</Text>
+
+        <Text style={styles.rowLabel}>API Team ID</Text>
+        <Text selectable style={styles.code}>{currentUser.data?.teamId ?? '—'}</Text>
+
+        <Text style={styles.rowLabel}>API Role</Text>
+        <Text style={styles.rowValue}>{currentUser.data?.role ?? currentUser.effectiveRole ?? '—'}</Text>
+
         {isTeamLead ? (
           <>
             <Text style={styles.rowLabel}>Team Join Code</Text>
