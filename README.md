@@ -59,6 +59,45 @@ pnpm dev
 2. backend infra boot (`cloud-sql-proxy`, `redis`, `api`, `worker`) in Docker
 3. host UI runtime (`web-admin`, `iOS simulator mobile`)
 
+### Local setup (no Cloud SQL)
+
+Use this flow when you want everything in local development mode (local Postgres + local Redis + host app processes).
+
+1. Ensure Docker Desktop is running.
+2. Ensure `.env` points to local services:
+
+```bash
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/suivo
+REDIS_URL=redis://localhost:6379
+```
+
+3. Start the full local stack in simulator mode:
+
+```bash
+pnpm dev:local:simulator
+```
+
+Or start the full local stack for a physical device on your local network:
+
+```bash
+pnpm dev:local:device
+```
+
+`pnpm dev:local:simulator` and `pnpm dev:local:device` run local infra (`postgres`, `redis`), apply migrations, verify DB state, and start `api`, `worker`, `web-admin`, and `mobile`.
+`pnpm dev:local` remains an alias for `pnpm dev:local:simulator`.
+
+4. Optional clean restart if ports/processes are stuck:
+
+```bash
+pnpm dev:reset
+```
+
+5. Stop local infra when done:
+
+```bash
+pnpm infra:down:local
+```
+
 ### Useful commands
 
 - `pnpm infra:up` - start Cloud SQL proxy + Redis + API + Worker
@@ -68,7 +107,10 @@ pnpm dev
 - `pnpm infra:logs` - follow backend container logs
 - `pnpm infra:logs:local` - follow local Postgres + Redis logs
 - `pnpm dev:ui` - run only web-admin + mobile on host
-- `pnpm dev:local` - run full local stack (Postgres + Redis + api + worker + web + mobile)
+- `pnpm dev:local` - alias for `pnpm dev:local:simulator`
+- `pnpm dev:local:simulator` - run full local stack with iOS simulator mobile flow
+- `pnpm dev:local:device` - run full local stack with physical-device (LAN) mobile flow
+- `pnpm dev:reset` - stop existing local/docker dev state and restart `dev:local`
 - `pnpm env:pull` - sync `.env` files from GCP Secret Manager
 - `pnpm env:check` - validate environment contracts
 - `pnpm gcp:check` - validate gcloud project and auth
@@ -91,7 +133,10 @@ pnpm dev
 - `pnpm hooks:install` - point git hooks to `.husky`
 - `pnpm dev` - full local dev flow (deps + db doctor + backend apps + UIs)
 - `pnpm dev:no-mobile` - local dev flow without mobile UI
-- `pnpm dev:local` - full local dev flow using local Postgres/Redis + host app processes
+- `pnpm dev:local` - alias for `pnpm dev:local:simulator`
+- `pnpm dev:local:simulator` - local Postgres/Redis + host apps + mobile simulator mode
+- `pnpm dev:local:device` - local Postgres/Redis + host apps + mobile device (LAN) mode
+- `pnpm dev:reset` - clean restart into `dev:local`
 - `pnpm dev:ui` - run host UIs only
 - `pnpm infra:up` - start Cloud SQL proxy + Redis + API + Worker
 - `pnpm infra:up:deps` - start Cloud SQL proxy + Redis only
@@ -123,7 +168,9 @@ pnpm dev
 
 - First-time setup: `pnpm setup`
 - Full local dev (api + worker + web + mobile): `pnpm dev`
-- Full local dev without Cloud SQL proxy: `pnpm dev:local`
+- Full local dev without Cloud SQL proxy (simulator): `pnpm dev:local:simulator`
+- Full local dev without Cloud SQL proxy (physical device): `pnpm dev:local:device`
+- Clean local restart: `pnpm dev:reset`
 - Local dev without mobile: `pnpm dev:no-mobile`
 - Start only infra dependencies: `pnpm infra:up:deps`
 - Start only backend app containers: `pnpm infra:up:apps`

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+MOBILE_MODE="${1:-dev:ios}"
+
 pnpm --filter @mvp/api dev &
 API_PID=$!
 
@@ -10,7 +12,7 @@ WORKER_PID=$!
 pnpm --filter @mvp/web-admin dev &
 WEB_PID=$!
 
-pnpm --filter @mvp/mobile dev:ios &
+pnpm --filter @mvp/mobile "$MOBILE_MODE" &
 MOBILE_PID=$!
 
 cleanup() {
