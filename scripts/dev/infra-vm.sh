@@ -48,33 +48,29 @@ ensure_port() {
 
 normalize_vm_project_dir() {
   local dir="$1"
-  local remainder
 
+  # Default if unset
   if [ -z "$dir" ]; then
     printf '%s' '~/projects/suivo'
     return 0
   fi
 
-  if [ "$dir" = "$HOME" ]; then
-    printf '%s' '~'
+  # If already using ~ syntax, keep it
+  case "$dir" in
+    "~"|"~/"*)
+      printf '%s' "$dir"
+      return 0
+      ;;
+  esac
+
+  # If absolute path, keep it exactly as provided
+  if [[ "$dir" = /* ]]; then
+    printf '%s' "$dir"
     return 0
   fi
 
-  case "$dir" in
-    "$HOME"/*)
-      # When .env.vm is sourced, an unquoted value like ~/projects/suivo
-      # expands to the local machine home path. Convert it back.
-      remainder="${dir#"$HOME"/}"
-      while [[ "$remainder" == "~/"* ]]; do
-        remainder="${remainder#~/}"
-      done
-      printf '%s' "~/$remainder"
-      ;;
-    *)
-      # Defend against malformed values like /home/user/~/projects/app.
-      printf '%s' "${dir//\/~\//\/}"
-      ;;
-  esac
+  # Fallback
+  printf '%s' "$dir"
 }
 
 remote_project_dir_expr() {
