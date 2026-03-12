@@ -212,6 +212,7 @@ export class LeadsService {
 
     if (created.rowCount) {
       await this.ensureContactNowTask(client, lead.id, args.ownerAgentId);
+      await this.recordLeadCreatedEvent(client, lead.id, args.source, args.provenance);
     }
 
     await this.ensureDerivedProfile(client, lead.id, args.language ?? 'en', args.provenance);
@@ -259,6 +260,7 @@ export class LeadsService {
 
     if (created.rowCount) {
       await this.ensureContactNowTask(client, lead.id, args.ownerAgentId);
+      await this.recordLeadCreatedEvent(client, lead.id, args.source, args.provenance);
     }
 
     await this.ensureDerivedProfile(client, lead.id, args.language ?? 'en', args.provenance);
@@ -373,5 +375,40 @@ export class LeadsService {
         [leadId, ownerId]
       );
     }
+  }
+
+  private async recordLeadCreatedEvent(
+    client: PoolClient,
+    leadId: string,
+    source: 'email' | 'sms' | 'call' | 'manual',
+    provenance?: LeadProvenance
+  ): Promise<void> {
+    const meta = {
+      source,
+      intake_origin: provenance?.intake_origin ?? null,
+      intake_channel_ref: provenance?.intake_channel_ref ?? null,
+      broker_assigned: provenance?.broker_assigned ?? false
+    };
+
+    await client.query(
+      `INSERT INTO "ConversationEvent" (
+         lead_id,
+         channel,
+         type,
+         direction,
+         raw_body,
+         meta,
+         created_at
+       ) VALUES (
+         $1,
+         'system',
+         'lead_created',
+         'internal',
+         NULL,
+         $2::jsonb,
+         now()
+       )`,
+      [leadId, JSON.stringify(meta)]
+    );
   }
 }

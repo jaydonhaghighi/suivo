@@ -302,6 +302,10 @@ export default function TaskDeckScreen(): JSX.Element {
   const tasks = useQuery({
     queryKey: ['task-deck', currentUser.data?.userId, currentUser.data?.teamId, currentUser.data?.role],
     queryFn: () => apiGet<TaskCard[]>('/task-deck'),
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
+    refetchOnReconnect: true
   });
 
   const doneMutation = useMutation({

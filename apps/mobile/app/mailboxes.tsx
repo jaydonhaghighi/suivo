@@ -61,8 +61,6 @@ export default function MailboxesScreen(): JSX.Element {
   const connectedProviderParam = normalizeParam(params.provider);
   const connectedProvider = isProvider(connectedProviderParam) ? connectedProviderParam : undefined;
   const [loginHint, setLoginHint] = useState('');
-  const [gmailDebugOutput, setGmailDebugOutput] = useState<string>('');
-  const [gmailDebugMailboxId, setGmailDebugMailboxId] = useState<string | null>(null);
 
   useEffect(() => {
     if (connected) {
@@ -91,19 +89,9 @@ export default function MailboxesScreen(): JSX.Element {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
   });
 
-  const testGmailMutation = useMutation({
-    mutationFn: (mailboxId: string) =>
-      apiPost<Record<string, unknown>>(`/mailboxes/${mailboxId}/gmail/test-last-hour`, {}),
-    onSuccess: (data, mailboxId) => {
-      setGmailDebugMailboxId(mailboxId);
-      setGmailDebugOutput(JSON.stringify(data, null, 2));
-    }
-  });
-
   const mailboxErrorMessage = mailboxes.error instanceof Error ? mailboxes.error.message : null;
   const connectErrorMessage = connectMutation.error instanceof Error ? connectMutation.error.message : null;
   const backfillErrorMessage = backfillMutation.error instanceof Error ? backfillMutation.error.message : null;
-  const gmailTestErrorMessage = testGmailMutation.error instanceof Error ? testGmailMutation.error.message : null;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -160,6 +148,10 @@ export default function MailboxesScreen(): JSX.Element {
 
         {mailboxes.data?.map((mailbox) => (
           <View key={mailbox.id} style={styles.mailboxRow}>
+            <View style={styles.mailboxStatusSection}>
+              {mailbox.status === 'active' ? <View style={styles.connectedDot} /> : <View style={styles.statusDotPlaceholder} />}
+            </View>
+
             <View style={styles.mailboxDetails}>
               <Text style={styles.mailboxPrimary}>{formatProvider(mailbox.provider)} · {mailbox.email_address}</Text>
               <Text style={styles.meta}>
@@ -175,16 +167,6 @@ export default function MailboxesScreen(): JSX.Element {
               >
                 <Text style={styles.backfillButtonText}>Backfill</Text>
               </Pressable>
-
-              {mailbox.provider === 'gmail' ? (
-                <Pressable
-                  style={[styles.testButton, testGmailMutation.isPending ? styles.disabled : null]}
-                  onPress={() => testGmailMutation.mutate(mailbox.id)}
-                  disabled={testGmailMutation.isPending}
-                >
-                  <Text style={styles.testButtonText}>Test Gmail</Text>
-                </Pressable>
-              ) : null}
             </View>
           </View>
         ))}
@@ -196,18 +178,7 @@ export default function MailboxesScreen(): JSX.Element {
 
       {connectErrorMessage ? <Text style={styles.error}>{connectErrorMessage}</Text> : null}
       {backfillErrorMessage ? <Text style={styles.error}>{backfillErrorMessage}</Text> : null}
-      {gmailTestErrorMessage ? <Text style={styles.error}>{gmailTestErrorMessage}</Text> : null}
       {backfillMutation.isSuccess ? <Text style={styles.successBody}>Backfill job queued.</Text> : null}
-
-      {gmailDebugOutput ? (
-        <Card tone={mode}>
-          <Text style={styles.sectionTitle}>Gmail API Result (Last Hour)</Text>
-          {gmailDebugMailboxId ? <Text style={styles.meta}>Mailbox: {gmailDebugMailboxId}</Text> : null}
-          <Text selectable style={styles.debugOutput}>
-            {gmailDebugOutput}
-          </Text>
-        </Card>
-      ) : null}
     </ScrollView>
   );
 }
@@ -265,7 +236,8 @@ function createStyles(colors: TabThemeColors) {
       flex: 1,
       borderRadius: 12,
       paddingVertical: 12,
-      alignItems: 'center'
+      alignItems: 'center',
+      justifyContent: 'center'
     },
     gmailButton: {
       backgroundColor: '#1A73E8'
@@ -275,12 +247,16 @@ function createStyles(colors: TabThemeColors) {
     },
     connectButtonText: {
       color: colors.white,
-      fontWeight: '800'
+      fontWeight: '800',
+      textAlign: 'center'
     },
     mailboxRow: {
-      borderTopColor: colors.border,
-      borderTopWidth: 1,
-      paddingTop: spacing.sm,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 14,
+      backgroundColor: colors.surfaceMuted,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.md,
       marginTop: spacing.sm,
       flexDirection: 'row',
       alignItems: 'center',
@@ -290,44 +266,54 @@ function createStyles(colors: TabThemeColors) {
     mailboxDetails: {
       flex: 1
     },
+    mailboxStatusSection: {
+      width: 22,
+      minHeight: 56,
+      alignItems: 'center',
+      justifyContent: 'center'
+    },
+    connectedDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 999,
+      backgroundColor: '#22C55E'
+    },
+    statusDotPlaceholder: {
+      width: 10,
+      height: 10
+    },
     mailboxActions: {
-      gap: 8
+      gap: 8,
+      alignItems: 'center',
+      justifyContent: 'center'
     },
     mailboxPrimary: {
       color: colors.text,
-      fontSize: 14,
+      fontSize: 15,
       fontWeight: '700'
     },
     meta: {
       color: colors.textSecondary,
-      marginTop: 3,
-      fontSize: 12
+      marginTop: 6,
+      fontSize: 13
     },
     backfillButton: {
       backgroundColor: colors.surfaceMuted,
       borderColor: colors.border,
       borderWidth: 1,
       borderRadius: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 10
+      minWidth: 96,
+      height: 42,
+      paddingHorizontal: 14,
+      alignItems: 'center',
+      justifyContent: 'center'
     },
     backfillButtonText: {
       color: colors.text,
       fontWeight: '700',
-      fontSize: 12
-    },
-    testButton: {
-      backgroundColor: '#188038',
-      borderColor: '#188038',
-      borderWidth: 1,
-      borderRadius: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 10
-    },
-    testButtonText: {
-      color: colors.white,
-      fontWeight: '700',
-      fontSize: 12
+      fontSize: 13,
+      lineHeight: 16,
+      textAlign: 'center'
     },
     disabled: {
       opacity: 0.6
@@ -344,12 +330,6 @@ function createStyles(colors: TabThemeColors) {
     successBody: {
       color: colors.textSecondary,
       marginTop: 4
-    },
-    debugOutput: {
-      marginTop: spacing.sm,
-      color: colors.text,
-      fontSize: 12,
-      lineHeight: 18
     }
   });
 }

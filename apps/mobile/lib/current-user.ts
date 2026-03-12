@@ -36,7 +36,10 @@ export function useCurrentUser(options?: { enabled?: boolean }) {
     queryFn: () => apiGet<CurrentUser>('/users/me'),
     enabled: options?.enabled ?? true,
     staleTime: 60_000,
-    retry: 1
+    retry: 3,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: true,
+    refetchOnReconnect: true
   });
 
   const effectiveRole = query.data?.role ?? getConfiguredDevRole();

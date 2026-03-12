@@ -242,11 +242,13 @@ function createStyles(colors: TabThemeColors) {
       borderRadius: 14,
       alignItems: 'center',
       paddingVertical: 14,
-      overflow: 'hidden'
+      overflow: 'hidden',
+      textAlign: 'center'
     },
     ctaText: {
       color: colors.white,
-      fontWeight: '800'
+      fontWeight: '800',
+      textAlign: 'center'
     },
     signOut: {
       marginTop: spacing.md,

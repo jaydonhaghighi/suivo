@@ -128,9 +128,22 @@ export class MailboxesService implements OnModuleDestroy {
   async list(user: UserContext): Promise<Record<string, unknown>[]> {
     return this.databaseService.withUserTransaction(user, async (client) => {
       const result = await client.query(
-        `SELECT id, user_id, provider, email_address, mailbox_type, delegated_from, status, created_at, updated_at
-         FROM "MailboxConnection"
-         ORDER BY created_at DESC`
+        `SELECT
+            m.id,
+            m.user_id,
+            m.provider,
+            m.email_address,
+            m.mailbox_type,
+            m.delegated_from,
+            m.status,
+            m.created_at,
+            m.updated_at
+         FROM "MailboxConnection" m
+         JOIN "User" u ON u.id = m.user_id
+         WHERE m.user_id = $1
+            OR ($3 = 'TEAM_LEAD' AND u.team_id = $2)
+         ORDER BY m.created_at DESC`,
+        [user.userId, user.teamId, user.role]
       );
       return result.rows;
     });
@@ -312,8 +325,16 @@ export class MailboxesService implements OnModuleDestroy {
 
     await this.databaseService.withUserTransaction(user, async (client) => {
       const check = await client.query(
-        'SELECT id, provider FROM "MailboxConnection" WHERE id = $1 LIMIT 1',
-        [mailboxId]
+        `SELECT m.id, m.provider
+         FROM "MailboxConnection" m
+         JOIN "User" u ON u.id = m.user_id
+         WHERE m.id = $1
+           AND (
+             m.user_id = $2
+             OR ($4 = 'TEAM_LEAD' AND u.team_id = $3)
+           )
+         LIMIT 1`,
+        [mailboxId, user.userId, user.teamId, user.role]
       );
       if (!check.rowCount || !check.rows[0]) {
         throw new NotFoundException('Mailbox not found');
@@ -610,17 +631,22 @@ export class MailboxesService implements OnModuleDestroy {
     return this.databaseService.withUserTransaction(user, async (client) => {
       const result = await client.query<MailboxAuthRow>(
         `SELECT
-          id,
-          provider,
-          email_address,
-          oauth_access_token,
-          oauth_refresh_token,
-          oauth_token_expires_at,
-          oauth_scope
-         FROM "MailboxConnection"
-         WHERE id = $1
+            m.id,
+            m.provider,
+            m.email_address,
+            m.oauth_access_token,
+            m.oauth_refresh_token,
+            m.oauth_token_expires_at,
+            m.oauth_scope
+         FROM "MailboxConnection" m
+         JOIN "User" u ON u.id = m.user_id
+         WHERE m.id = $1
+           AND (
+             m.user_id = $2
+             OR ($4 = 'TEAM_LEAD' AND u.team_id = $3)
+           )
          LIMIT 1`,
-        [mailboxId]
+        [mailboxId, user.userId, user.teamId, user.role]
       );
 
       if (!result.rowCount || !result.rows[0]) {

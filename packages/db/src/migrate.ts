@@ -90,6 +90,7 @@ async function main(): Promise<void> {
   await client.connect();
 
   let lockAcquired = false;
+  let runFailed = false;
 
   try {
     await ensureMigrationTable(client);
@@ -127,9 +128,28 @@ async function main(): Promise<void> {
     }
 
     process.stdout.write('Migrations applied successfully\n');
+  } catch (error) {
+    runFailed = true;
+    throw error;
   } finally {
     if (lockAcquired) {
-      await releaseMigrationLock(client);
+      // Migrations are wrapped in SQL files; if one fails after BEGIN, the session
+      // remains in an aborted transaction until rollback.
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // no-op: safe when no transaction is active
+      }
+
+      try {
+        await releaseMigrationLock(client);
+      } catch (error) {
+        if (!runFailed) {
+          throw error;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(`Failed to release migration lock cleanly: ${message}\n`);
+      }
     }
     await client.end();
   }
@@ -237,6 +257,58 @@ async function alreadyAppliedLegacy(client: Client, filename: string): Promise<b
          )`
     );
     return Number(check.rows[0]?.count ?? 0) === 4;
+  }
+
+  if (filename.startsWith('009_')) {
+    const check = await client.query<{ has_hash: boolean; has_index: boolean }>(
+      `SELECT
+         EXISTS (
+           SELECT 1
+           FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND table_name = 'Team'
+             AND column_name = 'join_code_hash'
+         ) AS has_hash,
+         EXISTS (
+           SELECT 1
+           FROM pg_indexes
+           WHERE schemaname = 'public'
+             AND indexname = 'ux_team_join_code_hash'
+         ) AS has_index`
+    );
+    return Boolean(check.rows[0]?.has_hash && check.rows[0]?.has_index);
+  }
+
+  if (filename.startsWith('010_')) {
+    const check = await client.query(
+      `SELECT 1
+       FROM pg_proc
+       WHERE proname = 'app_clerk_id'
+       LIMIT 1`
+    );
+    return Boolean(check.rowCount);
+  }
+
+  if (filename.startsWith('011_')) {
+    const check = await client.query(
+      `SELECT 1
+       FROM pg_proc
+       WHERE proname = 'app_team_join_code_hash'
+       LIMIT 1`
+    );
+    return Boolean(check.rowCount);
+  }
+
+  if (filename.startsWith('012_')) {
+    const check = await client.query<{ has_table: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM information_schema.tables
+         WHERE table_schema = 'public'
+           AND table_name = 'NotificationReadState'
+       ) AS has_table`
+    );
+    return Boolean(check.rows[0]?.has_table);
   }
 
   return false;

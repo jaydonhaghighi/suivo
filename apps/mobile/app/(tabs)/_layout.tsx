@@ -50,6 +50,8 @@ export default function TabsLayout(): JSX.Element {
           const iconName =
             route.name === 'task-deck'
               ? 'layers'
+              : route.name === 'notifications'
+                ? 'bell'
               : route.name === 'leads'
                 ? 'users'
                 : route.name === 'metrics'
@@ -62,6 +64,7 @@ export default function TabsLayout(): JSX.Element {
       })}
     >
       <Tabs.Screen name="task-deck" options={{ title: 'Tasks' }} />
+      <Tabs.Screen name="notifications" options={{ title: 'Alerts' }} />
       <Tabs.Screen name="leads" options={{ title: 'Leads' }} />
       <Tabs.Screen name="metrics" options={{ title: 'Metrics' }} />
       <Tabs.Screen name="admin-hub" options={{ title: 'Admin', href: isTeamLead ? '/admin-hub' : null }} />
