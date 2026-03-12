@@ -5,13 +5,15 @@
   "main": "expo-router/entry",
   "scripts": {
     "dev": "expo start",
-    "dev:ios": "expo start --ios",
+    "dev:ios": "expo start --ios --localhost",
     "dev:lan": "expo start --lan -c",
     "dev:tunnel": "expo start --tunnel -c",
     "build": "expo export",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'No mobile tests yet'"
+    "test": "echo 'No mobile tests yet'",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "engines": {
     "node": ">=20 <25"
@@ -37,6 +39,7 @@
     "react-native-screens": "~4.16.0"
   },
   "devDependencies": {
+    "babel-preset-expo": "~54.0.10",
     "@expo/ngrok": "^4.1.0",
     "@types/node": "^22.10.1",
     "@types/react": "~19.1.17",

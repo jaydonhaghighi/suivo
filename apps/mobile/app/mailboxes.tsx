@@ -148,6 +148,10 @@ export default function MailboxesScreen(): JSX.Element {
 
         {mailboxes.data?.map((mailbox) => (
           <View key={mailbox.id} style={styles.mailboxRow}>
+            <View style={styles.mailboxStatusSection}>
+              {mailbox.status === 'active' ? <View style={styles.connectedDot} /> : <View style={styles.statusDotPlaceholder} />}
+            </View>
+
             <View style={styles.mailboxDetails}>
               <Text style={styles.mailboxPrimary}>{formatProvider(mailbox.provider)} · {mailbox.email_address}</Text>
               <Text style={styles.meta}>
@@ -155,13 +159,15 @@ export default function MailboxesScreen(): JSX.Element {
               </Text>
             </View>
 
-            <Pressable
-              style={[styles.backfillButton, backfillMutation.isPending ? styles.disabled : null]}
-              onPress={() => backfillMutation.mutate(mailbox.id)}
-              disabled={backfillMutation.isPending}
-            >
-              <Text style={styles.backfillButtonText}>Backfill</Text>
-            </Pressable>
+            <View style={styles.mailboxActions}>
+              <Pressable
+                style={[styles.backfillButton, backfillMutation.isPending ? styles.disabled : null]}
+                onPress={() => backfillMutation.mutate(mailbox.id)}
+                disabled={backfillMutation.isPending}
+              >
+                <Text style={styles.backfillButtonText}>Backfill</Text>
+              </Pressable>
+            </View>
           </View>
         ))}
 
@@ -230,7 +236,8 @@ function createStyles(colors: TabThemeColors) {
       flex: 1,
       borderRadius: 12,
       paddingVertical: 12,
-      alignItems: 'center'
+      alignItems: 'center',
+      justifyContent: 'center'
     },
     gmailButton: {
       backgroundColor: '#1A73E8'
@@ -240,12 +247,16 @@ function createStyles(colors: TabThemeColors) {
     },
     connectButtonText: {
       color: colors.white,
-      fontWeight: '800'
+      fontWeight: '800',
+      textAlign: 'center'
     },
     mailboxRow: {
-      borderTopColor: colors.border,
-      borderTopWidth: 1,
-      paddingTop: spacing.sm,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 14,
+      backgroundColor: colors.surfaceMuted,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.md,
       marginTop: spacing.sm,
       flexDirection: 'row',
       alignItems: 'center',
@@ -255,28 +266,54 @@ function createStyles(colors: TabThemeColors) {
     mailboxDetails: {
       flex: 1
     },
+    mailboxStatusSection: {
+      width: 22,
+      minHeight: 56,
+      alignItems: 'center',
+      justifyContent: 'center'
+    },
+    connectedDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 999,
+      backgroundColor: '#22C55E'
+    },
+    statusDotPlaceholder: {
+      width: 10,
+      height: 10
+    },
+    mailboxActions: {
+      gap: 8,
+      alignItems: 'center',
+      justifyContent: 'center'
+    },
     mailboxPrimary: {
       color: colors.text,
-      fontSize: 14,
+      fontSize: 15,
       fontWeight: '700'
     },
     meta: {
       color: colors.textSecondary,
-      marginTop: 3,
-      fontSize: 12
+      marginTop: 6,
+      fontSize: 13
     },
     backfillButton: {
       backgroundColor: colors.surfaceMuted,
       borderColor: colors.border,
       borderWidth: 1,
       borderRadius: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 10
+      minWidth: 96,
+      height: 42,
+      paddingHorizontal: 14,
+      alignItems: 'center',
+      justifyContent: 'center'
     },
     backfillButtonText: {
       color: colors.text,
       fontWeight: '700',
-      fontSize: 12
+      fontSize: 13,
+      lineHeight: 16,
+      textAlign: 'center'
     },
     disabled: {
       opacity: 0.6

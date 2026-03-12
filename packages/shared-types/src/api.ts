@@ -42,6 +42,20 @@ export const roleHeaderSchema = z.object({
   role: z.enum(['AGENT', 'TEAM_LEAD'])
 });
 
+const onboardingBaseSchema = z.object({
+  language: z.string().min(2).max(10).optional()
+});
+
+export const onboardingRegisterSchema = z.discriminatedUnion('role', [
+  onboardingBaseSchema.extend({
+    role: z.literal('TEAM_LEAD')
+  }),
+  onboardingBaseSchema.extend({
+    role: z.literal('AGENT'),
+    team_code: z.string().min(1)
+  })
+]);
+
 export const leadStateSchema = z.enum(LEAD_STATES as [string, ...string[]]);
 export const taskStatusSchema = z.enum(TASK_STATUSES as [string, ...string[]]);
 export const taskTypeSchema = z.enum(TASK_TYPES as [string, ...string[]]);

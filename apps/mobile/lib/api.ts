@@ -1,7 +1,69 @@
 import Constants from 'expo-constants';
 
 const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, string>;
-const apiBaseUrl = extra.API_BASE_URL ?? process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:3001/v1';
+
+function isLoopbackHost(host: string): boolean {
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+function inferDevHost(): string | null {
+  const hostUri = Constants.expoConfig?.hostUri;
+  if (hostUri) {
+    return hostUri.split(':')[0] ?? null;
+  }
+
+  if (Constants.linkingUri) {
+    try {
+      const linkingUrl = new URL(Constants.linkingUri);
+      if (linkingUrl.hostname) {
+        return linkingUrl.hostname;
+      }
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function withDefaultV1Path(pathname: string): string {
+  if (!pathname || pathname === '/') {
+    return '/v1';
+  }
+  return pathname.endsWith('/v1') ? pathname : `${pathname.replace(/\/+$/, '')}/v1`;
+}
+
+function resolveApiBaseUrl(): string {
+  const raw = (extra.API_BASE_URL ?? process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim();
+  const fallbackHost = inferDevHost() ?? 'localhost';
+
+  if (!raw) {
+    return `http://${fallbackHost}:3001/v1`;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    const inferredHost = inferDevHost();
+
+    // "localhost:8081" usually points to Metro, not API.
+    if (parsed.port === '8081') {
+      parsed.port = '3001';
+      parsed.pathname = '/v1';
+    }
+
+    // On physical devices, localhost points to phone itself; prefer dev host.
+    if (inferredHost && !isLoopbackHost(inferredHost) && isLoopbackHost(parsed.hostname)) {
+      parsed.hostname = inferredHost;
+    }
+
+    parsed.pathname = withDefaultV1Path(parsed.pathname);
+    return parsed.toString().replace(/\/+$/, '');
+  } catch (_error) {
+    return `http://${fallbackHost}:3001/v1`;
+  }
+}
+
+const apiBaseUrl = resolveApiBaseUrl();
 
 let _getToken: (() => Promise<string | null>) | null = null;
 
@@ -9,13 +71,83 @@ export function setTokenProvider(fn: () => Promise<string | null>): void {
   _getToken = fn;
 }
 
+function devHeaderValue(key: string): string | undefined {
+  const extraValue = extra[key];
+  if (typeof extraValue === 'string' && extraValue.trim().length > 0) {
+    return extraValue.trim();
+  }
+
+  const envValue = process.env[`EXPO_PUBLIC_${key}`];
+  if (typeof envValue === 'string' && envValue.trim().length > 0) {
+    return envValue.trim();
+  }
+
+  return undefined;
+}
+
+function devAuthHeaders(): Record<string, string> {
+  const userId = devHeaderValue('DEV_USER_ID');
+  const teamId = devHeaderValue('DEV_TEAM_ID');
+  const role = devHeaderValue('DEV_ROLE');
+  if (!userId || !teamId || !role) {
+    return {};
+  }
+
+  return {
+    'x-user-id': userId,
+    'x-team-id': teamId,
+    'x-role': role
+  };
+}
+
+function parseBooleanFlag(value: string | undefined): boolean | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+    return true;
+  }
+  if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+    return false;
+  }
+
+  return undefined;
+}
+
+function shouldPreferDevAuthHeaders(devHeaders: Record<string, string>): boolean {
+  const explicit = parseBooleanFlag(devHeaderValue('FORCE_DEV_AUTH'));
+  if (explicit === true) {
+    return Object.keys(devHeaders).length > 0;
+  }
+
+  // Default behavior: prefer Clerk bearer token identity and derive DB user
+  // by clerk_id on the API side. Dev headers are an explicit override only.
+  return false;
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
+  const fallbackHeaders = devAuthHeaders();
+  if (shouldPreferDevAuthHeaders(fallbackHeaders)) {
+    return fallbackHeaders;
+  }
+
   if (_getToken) {
-    const token = await _getToken();
-    if (token) {
-      return { Authorization: `Bearer ${token}` };
+    try {
+      const token = await _getToken();
+      if (token) {
+        return { Authorization: `Bearer ${token}` };
+      }
+    } catch (_tokenError) {
+      // Fall through to optional dev header auth.
     }
   }
+
+  if (Object.keys(fallbackHeaders).length > 0) {
+    return fallbackHeaders;
+  }
+
   return {};
 }
 
@@ -25,11 +157,19 @@ async function buildHttpError(response: Response): Promise<Error> {
   try {
     const contentType = response.headers.get('content-type') ?? '';
     if (contentType.includes('application/json')) {
-      const parsed = (await response.json()) as { message?: unknown };
+      const parsed = (await response.json()) as { message?: unknown; error?: unknown; statusCode?: unknown };
       if (typeof parsed.message === 'string') {
         details = parsed.message;
       } else if (Array.isArray(parsed.message)) {
         details = parsed.message.filter((item) => typeof item === 'string').join(', ');
+      } else if (typeof parsed.error === 'string') {
+        details = parsed.error;
+      } else {
+        try {
+          details = JSON.stringify(parsed);
+        } catch (_jsonError) {
+          details = undefined;
+        }
       }
     } else {
       const textBody = await response.text();

@@ -30,6 +30,12 @@ export const rescueStepSchema = z.object({
   enabled: z.boolean().default(true)
 });
 
+export const brokerIntakeRuleSchema = z.object({
+  mailbox_connection_ids: z.array(z.string().uuid()).default([]),
+  phone_number_ids: z.array(z.string().uuid()).default([]),
+  stale_hours_for_assigned: z.number().int().positive().default(168)
+});
+
 export const escalationRuleSchema = z.object({
   templates: z.array(templateSchema).default([]),
   rescue_sequences: z.array(
@@ -40,7 +46,12 @@ export const escalationRuleSchema = z.object({
       steps: z.array(rescueStepSchema).min(1),
       updated_at: z.string().datetime()
     })
-  ).default([])
+  ).default([]),
+  broker_intake: brokerIntakeRuleSchema.default({
+    mailbox_connection_ids: [],
+    phone_number_ids: [],
+    stale_hours_for_assigned: 168
+  })
 });
 
 export type StaleRules = z.infer<typeof staleRuleSchema>;

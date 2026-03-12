@@ -84,8 +84,28 @@ const defaultEscalationRules = {
       ],
       updated_at: escalationUpdatedAt
     }
-  ]
+  ],
+  broker_intake: {
+    mailbox_connection_ids: [],
+    phone_number_ids: [],
+    stale_hours_for_assigned: 168
+  }
 };
+
+async function applyRlsContext(
+  client: Client,
+  userId: string,
+  teamId: string,
+  role: 'AGENT' | 'TEAM_LEAD'
+): Promise<void> {
+  await client.query(
+    `SELECT
+      set_config('app.user_id', $1, false),
+      set_config('app.team_id', $2, false),
+      set_config('app.role', $3, false)`,
+    [userId, teamId, role]
+  );
+}
 
 async function main(): Promise<void> {
   loadEnv();
@@ -100,6 +120,7 @@ async function main(): Promise<void> {
 
   try {
     await client.query('BEGIN');
+    await applyRlsContext(client, teamLeadId, teamId, 'TEAM_LEAD');
 
     await client.query(
       `INSERT INTO "Team" (id, stale_rules, sla_rules, escalation_rules)
@@ -122,6 +143,8 @@ async function main(): Promise<void> {
            language = EXCLUDED.language`,
       [agentId, teamLeadId, teamId]
     );
+
+    await applyRlsContext(client, agentId, teamId, 'AGENT');
 
     const leads = [
       {

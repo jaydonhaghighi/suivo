@@ -14,17 +14,17 @@ provider "google" {
 }
 
 locals {
-  prefix = "messaging-mvp-${var.environment}"
+  prefix = "suivo-${var.environment}"
 }
 
 resource "google_service_account" "api" {
   account_id   = "${local.prefix}-api"
-  display_name = "Messaging MVP API"
+  display_name = "Suivo API"
 }
 
 resource "google_service_account" "worker" {
   account_id   = "${local.prefix}-worker"
-  display_name = "Messaging MVP Worker"
+  display_name = "Suivo Worker"
 }
 
 resource "google_sql_database_instance" "postgres" {
@@ -40,7 +40,7 @@ resource "google_sql_database_instance" "postgres" {
 }
 
 resource "google_sql_database" "app" {
-  name     = "messaging_mvp"
+  name     = "suivo"
   instance = google_sql_database_instance.postgres.name
 }
 

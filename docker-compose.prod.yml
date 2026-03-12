@@ -1,0 +1,56 @@
+services:
+  cloud-sql-proxy:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.3
+    user: "0:0"
+    command:
+      - "--credentials-file=/gcloud/application_default_credentials.json"
+      - "--address=0.0.0.0"
+      - "--port=5432"
+      - "${CLOUD_SQL_INSTANCE_CONNECTION_NAME}"
+    volumes:
+      - "${HOME}/.config/gcloud/application_default_credentials.json:/gcloud/application_default_credentials.json:ro"
+    ports:
+      - "6432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  api:
+    image: node:22
+    working_dir: /workspace
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile=false && pnpm --filter @mvp/api dev"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "${DOCKER_DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:6432/messaging_mvp}"
+      REDIS_URL: "redis://redis:6379"
+    ports:
+      - "3001:3001"
+    volumes:
+      - .:/workspace
+      - /workspace/node_modules
+    depends_on:
+      - cloud-sql-proxy
+      - redis
+    restart: unless-stopped
+
+  worker:
+    image: node:22
+    working_dir: /workspace
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile=false && pnpm --filter @mvp/worker dev"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "${DOCKER_DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:6432/messaging_mvp}"
+      REDIS_URL: "redis://redis:6379"
+    volumes:
+      - .:/workspace
+      - /workspace/node_modules
+    depends_on:
+      - cloud-sql-proxy
+      - redis
+    restart: unless-stopped

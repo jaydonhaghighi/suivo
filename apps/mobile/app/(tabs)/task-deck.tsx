@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
 import { apiGet, apiPost } from '../../lib/api';
+import { useCurrentUser } from '../../lib/current-user';
 import { spacing } from '../../lib/theme';
 import { TabThemeColors, useTabTheme } from '../../lib/tab-theme';
 
@@ -174,8 +175,11 @@ function TaskSwipeCard({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponderCapture: () => false,
         onMoveShouldSetPanResponder: (_e, gs) =>
           Math.abs(gs.dx) > 8 && Math.abs(gs.dx) > Math.abs(gs.dy) * 0.9,
+        onMoveShouldSetPanResponderCapture: () => false,
         onPanResponderGrant: () => {
           translateX.stopAnimation();
           onSwipeStart();
@@ -196,8 +200,9 @@ function TaskSwipeCard({
           resetPosition();
         },
         onPanResponderTerminate: resetPosition,
-        onPanResponderTerminationRequest: () => false,
-        onShouldBlockNativeResponder: () => true,
+        // Allow native controls (including tab bar buttons) to take focus when needed.
+        onPanResponderTerminationRequest: () => true,
+        onShouldBlockNativeResponder: () => false,
       }),
     [translateX, onSwipeStart, onDone, onSnooze, task.id, flyOut, resetPosition]
   );
@@ -292,10 +297,15 @@ export default function TaskDeckScreen(): JSX.Element {
   const router = useRouter();
   const qc = useQueryClient();
   const [swipeCount, setSwipeCount] = useState(0);
+  const currentUser = useCurrentUser();
 
   const tasks = useQuery({
-    queryKey: ['task-deck'],
+    queryKey: ['task-deck', currentUser.data?.userId, currentUser.data?.teamId, currentUser.data?.role],
     queryFn: () => apiGet<TaskCard[]>('/task-deck'),
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
+    refetchOnReconnect: true
   });
 
   const doneMutation = useMutation({

@@ -25,7 +25,7 @@ export class TasksService {
          FROM "Task" t
          JOIN "Lead" l ON l.id = t.lead_id
          LEFT JOIN "DerivedLeadProfile" d ON d.lead_id = t.lead_id
-         WHERE t.status = 'open'
+         WHERE t.status IN ('open', 'snoozed')
            AND t.owner_id = $1
            AND t.due_at <= now() + interval '24 hours'
          ORDER BY t.due_at ASC

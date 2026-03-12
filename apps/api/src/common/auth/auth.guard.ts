@@ -6,26 +6,20 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
-import { createRemoteJWKSet, jwtVerify, JWTVerifyResult } from 'jose';
 
 import { DatabaseService } from '../db/database.service';
+import { JwtVerifierService } from './jwt-verifier.service';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { RequestWithUser, UserContext } from './user-context';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
-  private jwks?: ReturnType<typeof createRemoteJWKSet>;
-
   constructor(
     private readonly reflector: Reflector,
     private readonly configService: ConfigService,
-    private readonly databaseService: DatabaseService
-  ) {
-    const jwksUri = this.configService.get<string>('JWT_JWKS_URI');
-    if (jwksUri) {
-      this.jwks = createRemoteJWKSet(new URL(jwksUri));
-    }
-  }
+    private readonly databaseService: DatabaseService,
+    private readonly jwtVerifierService: JwtVerifierService
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -40,23 +34,19 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<
       RequestWithUser & { headers: Record<string, string | string[] | undefined> }
     >();
+    const allowDevHeaderAuth = this.isDevHeaderAuthEnabled();
 
     const authHeader = request.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      request.user = await this.validateJwt(authHeader.slice(7));
+    if (authHeader) {
+      const clerkId = await this.jwtVerifierService.getSubjectFromAuthorizationHeader(authHeader);
+      request.user = await this.resolveUser(clerkId);
       return true;
     }
 
-    if (this.configService.get<string>('NODE_ENV') !== 'production') {
-      const userId = request.headers['x-user-id'];
-      const teamId = request.headers['x-team-id'];
-      const role = request.headers['x-role'];
-      if (
-        typeof userId === 'string'
-        && typeof teamId === 'string'
-        && (role === 'AGENT' || role === 'TEAM_LEAD')
-      ) {
-        request.user = { userId, teamId, role };
+    if (allowDevHeaderAuth) {
+      const devUser = this.parseDevHeaderUser(request.headers);
+      if (devUser) {
+        request.user = devUser;
         return true;
       }
     }
@@ -64,42 +54,30 @@ export class AuthGuard implements CanActivate {
     throw new UnauthorizedException('Authentication required');
   }
 
-  private async validateJwt(token: string): Promise<UserContext> {
-    if (!this.jwks) {
-      throw new UnauthorizedException('JWKS not configured');
+  private isDevHeaderAuthEnabled(): boolean {
+    return this.configService.get<boolean>('ALLOW_DEV_HEADER_AUTH', false)
+      && this.configService.get<string>('NODE_ENV') === 'development';
+  }
+
+  private parseDevHeaderUser(
+    headers: Record<string, string | string[] | undefined>
+  ): UserContext | null {
+    const userId = headers['x-user-id'];
+    const teamId = headers['x-team-id'];
+    const role = headers['x-role'];
+    if (
+      typeof userId === 'string'
+      && typeof teamId === 'string'
+      && (role === 'AGENT' || role === 'TEAM_LEAD')
+    ) {
+      return { userId, teamId, role };
     }
 
-    const issuer = this.configService.get<string>('JWT_ISSUER');
-    const audience = this.configService.get<string>('JWT_AUDIENCE');
-
-    const verifyOptions: { issuer?: string; audience?: string } = {};
-    if (issuer) verifyOptions.issuer = issuer;
-    if (audience) verifyOptions.audience = audience;
-
-    let verified: JWTVerifyResult;
-    try {
-      verified = await jwtVerify(token, this.jwks, verifyOptions);
-    } catch (error) {
-      throw new UnauthorizedException('Invalid bearer token');
-    }
-
-    const subject = verified.payload.sub;
-    if (!subject) {
-      throw new UnauthorizedException('Token missing subject claim');
-    }
-
-    return this.resolveUser(subject);
+    return null;
   }
 
   private async resolveUser(clerkId: string): Promise<UserContext> {
-    const existing = await this.databaseService.query<{
-      id: string;
-      team_id: string;
-      role: 'AGENT' | 'TEAM_LEAD';
-    }>(
-      `SELECT id, team_id, role FROM "User" WHERE clerk_id = $1`,
-      [clerkId]
-    );
+    const existing = await this.findByClerkId(clerkId);
 
     if (existing.rows[0]) {
       return {
@@ -109,30 +87,25 @@ export class AuthGuard implements CanActivate {
       };
     }
 
-    if (this.configService.get<string>('NODE_ENV') !== 'production') {
-      const linked = await this.databaseService.query<{
-        id: string;
-        team_id: string;
-        role: 'AGENT' | 'TEAM_LEAD';
-      }>(
-        `UPDATE "User"
-         SET clerk_id = $1
-         WHERE clerk_id IS NULL AND role = 'AGENT'
-         RETURNING id, team_id, role`,
-        [clerkId]
-      );
-
-      if (linked.rows[0]) {
-        return {
-          userId: linked.rows[0].id,
-          teamId: linked.rows[0].team_id,
-          role: linked.rows[0].role
-        };
-      }
-    }
-
     throw new UnauthorizedException(
       'No linked user account found. Ask a team admin to provision your account.'
+    );
+  }
+
+  private findByClerkId(clerkId: string) {
+    return this.databaseService.query<{
+      id: string;
+      team_id: string;
+      role: 'AGENT' | 'TEAM_LEAD';
+    }>(
+      `WITH clerk_context AS (
+         SELECT set_config('app.clerk_id', $1, true)
+       )
+       SELECT u.id, u.team_id, u.role
+       FROM clerk_context, "User" u
+       WHERE u.clerk_id = $1
+       LIMIT 1`,
+      [clerkId]
     );
   }
 }

@@ -9,7 +9,9 @@
     "lint": "eslint src --ext .ts",
     "test": "echo 'No db unit tests'",
     "migrate": "tsx src/migrate.ts",
-    "seed": "tsx src/seed.ts"
+    "doctor": "tsx src/doctor.ts",
+    "seed": "tsx src/seed.ts",
+    "seed:admin": "tsx src/seed-admin-routing.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

@@ -2,6 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 
 import { Public } from '../../common/auth/public.decorator';
 import { DatabaseService } from '../../common/db/database.service';
+import { Roles } from '../../common/rbac/roles.decorator';
 
 @Controller('health')
 export class HealthController {
@@ -13,7 +14,7 @@ export class HealthController {
     return { status: 'ok', timestamp: new Date().toISOString() };
   }
 
-  @Public()
+  @Roles('TEAM_LEAD')
   @Get('/metrics')
   async metrics(): Promise<Record<string, number>> {
     const [events, tasks, stale] = await Promise.all([

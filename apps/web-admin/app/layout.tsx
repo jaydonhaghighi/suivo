@@ -23,6 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }): JSX.E
           }}
         >
           <Link href="/">Dashboard</Link>
+          <Link href="/admin">Admin</Link>
           <Link href="/rescue">Rescue</Link>
           <Link href="/templates">Templates</Link>
           <Link href="/rules">Rules</Link>

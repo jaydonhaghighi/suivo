@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Card } from '../../components/card';
 import { apiGet } from '../../lib/api';
+import { useCurrentUser } from '../../lib/current-user';
 import { spacing } from '../../lib/theme';
 import { TabThemeColors, useTabTheme } from '../../lib/tab-theme';
 
@@ -31,9 +32,10 @@ export default function LeadsScreen(): JSX.Element {
   const { colors, mode } = useTabTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [search, setSearch] = useState('');
+  const currentUser = useCurrentUser();
 
   const tasks = useQuery({
-    queryKey: ['task-deck'],
+    queryKey: ['task-deck', currentUser.data?.userId, currentUser.data?.teamId, currentUser.data?.role],
     queryFn: () => apiGet<TaskCard[]>('/task-deck')
   });
 

@@ -8,6 +8,7 @@ describe('StaleEvaluatorService', () => {
         rows: [
           {
             id: 'team-1',
+            team_lead_id: 'lead-1',
             stale_rules: { active_stale_hours: 1, at_risk_threshold_percent: 80, new_lead_sla_minutes: 60 },
             escalation_rules: { rescue_sequences: [] }
           }
@@ -21,7 +22,8 @@ describe('StaleEvaluatorService', () => {
             owner_agent_id: 'agent-1',
             state: 'Active',
             created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-            last_touch_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+            last_touch_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+            fields_json: {}
           }
         ]
       })

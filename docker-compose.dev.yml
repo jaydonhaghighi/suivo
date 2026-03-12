@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: suivo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d suivo"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  api:
+    image: node:22
+    working_dir: /workspace
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile=false && pnpm --filter @mvp/api dev"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/suivo"
+      REDIS_URL: "redis://redis:6379"
+    ports:
+      - "3001:3001"
+    volumes:
+      - .:/workspace
+      - /workspace/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  worker:
+    image: node:22
+    working_dir: /workspace
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile=false && pnpm --filter @mvp/worker dev"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/suivo"
+      REDIS_URL: "redis://redis:6379"
+    volumes:
+      - .:/workspace
+      - /workspace/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  pgdata-dev:

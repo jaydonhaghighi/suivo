@@ -113,12 +113,6 @@ export class CallsService {
 
       const leadId = eventResult.rows[0].lead_id as string;
       await this.leadsService.applyTouch(client, leadId, user.userId);
-
-      await client.query(
-        `INSERT INTO "Task" (lead_id, owner_id, due_at, status, type)
-         VALUES ($1, $2, now() + interval '24 hours', 'open', 'follow_up')`,
-        [leadId, user.userId]
-      );
     });
 
     return { event_id: eventId, outcome: parsed.outcome, updated: true };

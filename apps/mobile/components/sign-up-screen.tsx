@@ -12,19 +12,27 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { OnboardingSeed, SignupRole } from '../lib/onboarding';
 import { TabThemeColors, useTabTheme } from '../lib/tab-theme';
 
 interface Props {
   onSwitchToSignIn: () => void;
+  onVerificationComplete: (seed: OnboardingSeed) => void;
 }
 
-export function SignUpScreen({ onSwitchToSignIn }: Props): JSX.Element {
+function normalizeTeamCode(value: string): string {
+  return value.replace(/[\s-]+/g, '').toUpperCase();
+}
+
+export function SignUpScreen({ onSwitchToSignIn, onVerificationComplete }: Props): JSX.Element {
   const { colors } = useTabTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { signUp, setActive, isLoaded } = useSignUp();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [role, setRole] = useState<SignupRole>('AGENT');
+  const [teamCode, setTeamCode] = useState('');
   const [code, setCode] = useState('');
   const [pendingVerification, setPendingVerification] = useState(false);
   const [error, setError] = useState('');
@@ -60,6 +68,11 @@ export function SignUpScreen({ onSwitchToSignIn }: Props): JSX.Element {
 
       if (attempt.status === 'complete') {
         await setActive({ session: attempt.createdSessionId });
+        onVerificationComplete({
+          role,
+          teamCode: role === 'AGENT' ? normalizeTeamCode(teamCode) : '',
+          autoSubmit: true
+        });
       } else {
         setError('Verification incomplete. Please try again.');
       }
@@ -72,7 +85,7 @@ export function SignUpScreen({ onSwitchToSignIn }: Props): JSX.Element {
     } finally {
       setLoading(false);
     }
-  }, [isLoaded, signUp, setActive, code]);
+  }, [isLoaded, signUp, setActive, code, onVerificationComplete, role, teamCode]);
 
   if (pendingVerification) {
     return (
@@ -119,7 +132,8 @@ export function SignUpScreen({ onSwitchToSignIn }: Props): JSX.Element {
     );
   }
 
-  const disabled = !email || !password || loading;
+  const normalizedTeamCode = normalizeTeamCode(teamCode);
+  const disabled = !email || !password || loading || (role === 'AGENT' && !normalizedTeamCode);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -133,6 +147,36 @@ export function SignUpScreen({ onSwitchToSignIn }: Props): JSX.Element {
         </View>
 
         <View style={styles.form}>
+          <Text style={styles.label}>Role</Text>
+          <View style={styles.roleSwitch}>
+            <Pressable
+              style={[styles.roleOption, role === 'AGENT' ? styles.roleOptionActive : null]}
+              onPress={() => setRole('AGENT')}
+            >
+              <Text style={[styles.roleOptionText, role === 'AGENT' ? styles.roleOptionTextActive : null]}>Agent</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.roleOption, role === 'TEAM_LEAD' ? styles.roleOptionActive : null]}
+              onPress={() => setRole('TEAM_LEAD')}
+            >
+              <Text style={[styles.roleOptionText, role === 'TEAM_LEAD' ? styles.roleOptionTextActive : null]}>Team Lead</Text>
+            </Pressable>
+          </View>
+
+          {role === 'AGENT' ? (
+            <>
+              <Text style={styles.label}>Team Code</Text>
+              <TextInput
+                style={styles.input}
+                value={teamCode}
+                onChangeText={(value) => setTeamCode(normalizeTeamCode(value))}
+                placeholder="Enter team code"
+                placeholderTextColor={colors.tabInactive}
+                autoCapitalize="characters"
+              />
+            </>
+          ) : null}
+
           <Text style={styles.label}>Email</Text>
           <TextInput
             style={styles.input}
@@ -208,6 +252,33 @@ function createStyles(colors: TabThemeColors) {
     },
     form: {
       gap: 8
+    },
+    roleSwitch: {
+      marginTop: 6,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      padding: 4,
+      flexDirection: 'row',
+      gap: 8
+    },
+    roleOption: {
+      flex: 1,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center'
+    },
+    roleOptionActive: {
+      backgroundColor: colors.primary
+    },
+    roleOptionText: {
+      color: colors.textSecondary,
+      fontWeight: '700',
+      fontSize: 14
+    },
+    roleOptionTextActive: {
+      color: colors.white
     },
     label: {
       color: colors.textSecondary,

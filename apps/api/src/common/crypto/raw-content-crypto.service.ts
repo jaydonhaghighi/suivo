@@ -23,7 +23,11 @@ export class RawContentCryptoService {
     if (configuredKey) {
       this.key = Buffer.from(configuredKey, 'base64');
     } else {
-      this.key = randomBytes(32);
+      if (this.configService.get<string>('NODE_ENV') === 'test') {
+        this.key = randomBytes(32);
+      } else {
+        throw new Error('LOCAL_ENCRYPTION_KEY_BASE64 is required for deterministic raw-body encryption');
+      }
     }
 
     if (this.key.length !== 32) {

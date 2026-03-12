@@ -1,12 +1,13 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Worker } from 'bullmq';
 
 import { StaleEvaluatorService } from '../services/stale-evaluator.service';
 
 @Injectable()
-export class StaleDetectionJob implements OnModuleInit {
+export class StaleDetectionJob implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(StaleDetectionJob.name);
+  private worker?: Worker;
 
   constructor(
     private readonly configService: ConfigService,
@@ -14,7 +15,7 @@ export class StaleDetectionJob implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    const worker = new Worker(
+    this.worker = new Worker(
       'stale-detection',
       async () => this.staleEvaluatorService.evaluateAll(),
       {
@@ -24,12 +25,18 @@ export class StaleDetectionJob implements OnModuleInit {
       }
     );
 
-    worker.on('completed', (_, result) => {
+    this.worker.on('completed', (_, result) => {
       this.logger.log(`stale-detection completed: ${JSON.stringify(result)}`);
     });
 
-    worker.on('failed', (_, error) => {
+    this.worker.on('failed', (_, error) => {
       this.logger.error(`stale-detection failed: ${error.message}`);
     });
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    if (this.worker) {
+      await this.worker.close();
+    }
   }
 }

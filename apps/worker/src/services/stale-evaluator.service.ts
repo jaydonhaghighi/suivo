@@ -5,12 +5,16 @@ import { DatabaseService } from './database.service';
 
 interface TeamRuleRow {
   id: string;
+  team_lead_id: string | null;
   stale_rules: {
     new_lead_sla_minutes?: number;
     active_stale_hours?: number;
     at_risk_threshold_percent?: number;
   };
   escalation_rules: {
+    broker_intake?: {
+      stale_hours_for_assigned?: number;
+    };
     rescue_sequences?: Array<{
       id: string;
       language: string;
@@ -30,6 +34,7 @@ interface LeadRow {
   state: 'New' | 'Active' | 'At-Risk' | 'Stale';
   created_at: string;
   last_touch_at: string | null;
+  fields_json: Record<string, unknown> | null;
 }
 
 @Injectable()
@@ -41,7 +46,19 @@ export class StaleEvaluatorService {
   async evaluateAll(): Promise<{ processed: number; at_risk: number; stale: number }> {
     return this.databaseService.withTransaction(async (client) => {
       const teams = await client.query<TeamRuleRow>(
-        'SELECT id, stale_rules, escalation_rules FROM "Team" ORDER BY id'
+        `SELECT t.id,
+                t.stale_rules,
+                t.escalation_rules,
+                (
+                  SELECT u.id
+                  FROM "User" u
+                  WHERE u.team_id = t.id
+                    AND u.role = 'TEAM_LEAD'
+                  ORDER BY u.id
+                  LIMIT 1
+                ) AS team_lead_id
+         FROM "Team" t
+         ORDER BY t.id`
       );
 
       let processed = 0;
@@ -50,10 +67,17 @@ export class StaleEvaluatorService {
 
       for (const team of teams.rows) {
         const leads = await client.query<LeadRow>(
-          `SELECT id, team_id, owner_agent_id, state, created_at, last_touch_at
-           FROM "Lead"
-           WHERE team_id = $1
-             AND state IN ('New', 'Active', 'At-Risk')`,
+          `SELECT l.id,
+                  l.team_id,
+                  l.owner_agent_id,
+                  l.state,
+                  l.created_at,
+                  l.last_touch_at,
+                  d.fields_json
+           FROM "Lead" l
+           LEFT JOIN "DerivedLeadProfile" d ON d.lead_id = l.id
+           WHERE l.team_id = $1
+             AND l.state IN ('New', 'Active', 'At-Risk')`,
           [team.id]
         );
 
@@ -79,7 +103,11 @@ export class StaleEvaluatorService {
     team: TeamRuleRow,
     lead: LeadRow
   ): Promise<'none' | 'at_risk' | 'stale'> {
-    const staleHours = Number(team.stale_rules?.active_stale_hours ?? 48);
+    const brokerAssigned = Boolean(lead.fields_json?.broker_assigned);
+    const brokerAssignedStaleHours = Number(team.escalation_rules?.broker_intake?.stale_hours_for_assigned ?? 168);
+    const staleHours = brokerAssigned
+      ? brokerAssignedStaleHours
+      : Number(team.stale_rules?.active_stale_hours ?? 48);
     const atRiskPercent = Number(team.stale_rules?.at_risk_threshold_percent ?? 80);
     const newLeadSlaMinutes = Number(team.stale_rules?.new_lead_sla_minutes ?? 60);
 
@@ -91,6 +119,7 @@ export class StaleEvaluatorService {
     const elapsedMillis = now - touchMillis;
     const staleMillis = staleHours * 60 * 60 * 1000;
     const atRiskMillis = staleMillis * (atRiskPercent / 100);
+    const rescueTaskOwnerId = brokerAssigned && team.team_lead_id ? team.team_lead_id : lead.owner_agent_id;
 
     if (elapsedMillis >= staleMillis) {
       await client.query(
@@ -101,8 +130,8 @@ export class StaleEvaluatorService {
         [lead.id]
       );
 
-      await this.ensureRescueTask(client, lead.id, lead.owner_agent_id);
-      await this.applyRescueSequenceTasks(client, team, lead.id, lead.owner_agent_id);
+      await this.ensureRescueTask(client, lead.id, rescueTaskOwnerId);
+      await this.applyRescueSequenceTasks(client, team, lead.id, rescueTaskOwnerId);
       return 'stale';
     }
 
