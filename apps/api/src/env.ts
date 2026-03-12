@@ -36,6 +36,15 @@ export const appEnvSchema = z
     MAIL_SYNC_NEWER_THAN_HOURS: emptyToUndefined.optional(),
     MAIL_SYNC_MAX_RESULTS_PER_BOX: emptyToUndefined.optional(),
     MAIL_SYNC_MAILBOX_LIMIT: emptyToUndefined.optional(),
+    EMAIL_INTAKE_ENABLED: booleanFromString.default(true),
+    EMAIL_INTAKE_SHADOW_MODE: booleanFromString.default(true),
+    EMAIL_INTAKE_CUTOVER_ENABLED: booleanFromString.default(false),
+    EMAIL_INTAKE_CREATE_THRESHOLD: emptyToUndefined.optional(),
+    EMAIL_INTAKE_REVIEW_THRESHOLD: emptyToUndefined.optional(),
+    EMAIL_INTAKE_REVIEW_SLA_MINUTES: emptyToUndefined.optional(),
+    EMAIL_INTAKE_BLOCKED_LOCALPARTS: emptyToUndefined.optional(),
+    EMAIL_INTAKE_BLOCKED_DOMAINS: emptyToUndefined.optional(),
+    EMAIL_INTAKE_DISPOSABLE_DOMAINS: emptyToUndefined.optional(),
     ALLOW_DEV_HEADER_AUTH: booleanFromString.default(false)
   })
   .superRefine((config, ctx) => {

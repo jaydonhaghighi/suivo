@@ -13,6 +13,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { CallsModule } from './modules/calls/calls.module';
 import { HealthModule } from './modules/health/health.module';
 import { InternalModule } from './modules/internal/internal.module';
+import { IntakeModule } from './modules/intake/intake.module';
 import { LeadsModule } from './modules/leads/leads.module';
 import { MailboxesModule } from './modules/mailboxes/mailboxes.module';
 import { MessagesModule } from './modules/messages/messages.module';
@@ -35,6 +36,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
     HealthModule,
     AttachmentsModule,
     InternalModule,
+    IntakeModule,
     WebhooksModule,
     MailboxesModule,
     TasksModule,

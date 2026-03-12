@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { apiGet, apiPost } from '../lib/api';
+import { CURRENT_USER_QUERY_KEY } from '../lib/current-user';
 import { OnboardingSeed, SignupRole } from '../lib/onboarding';
 import { TabThemeColors, useTabTheme } from '../lib/tab-theme';
 
@@ -54,7 +55,7 @@ export function OnboardingScreen({ initialSeed, onCompleted }: Props): JSX.Eleme
   const canSubmit = role === 'TEAM_LEAD' || normalizeTeamCode(teamCode).length > 0;
 
   const completeProvisioning = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ['current-user'] });
+    await queryClient.invalidateQueries({ queryKey: CURRENT_USER_QUERY_KEY });
     onCompleted();
   }, [onCompleted, queryClient]);
 
@@ -82,7 +83,7 @@ export function OnboardingScreen({ initialSeed, onCompleted }: Props): JSX.Eleme
         try {
           const joinCode = await apiGet<TeamJoinCodeResponse>('/team/join-code');
           setJoinCodeResult(joinCode);
-          await queryClient.invalidateQueries({ queryKey: ['current-user'] });
+          await queryClient.invalidateQueries({ queryKey: CURRENT_USER_QUERY_KEY });
         } catch (joinCodeError: unknown) {
           if (joinCodeError instanceof Error) {
             setError(`Team code fetch failed: ${joinCodeError.message}`);

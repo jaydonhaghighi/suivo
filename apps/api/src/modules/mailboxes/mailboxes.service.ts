@@ -8,8 +8,13 @@ import { RawContentCryptoService } from '../../common/crypto/raw-content-crypto.
 import { DatabaseService } from '../../common/db/database.service';
 import { UserContext } from '../../common/auth/user-context';
 import { EmailIngestResult, WebhooksService } from '../webhooks/webhooks.service';
+import { EmailIngestSource } from '../webhooks/email-intake-qualification.service';
 import { GmailInboxMessageForIngestion, GmailProviderClient } from './providers/gmail.provider';
-import { OutlookProviderClient } from './providers/outlook.provider';
+import {
+  OutlookInboxMessageForIngestion,
+  OutlookMailboxAuthData,
+  OutlookProviderClient
+} from './providers/outlook.provider';
 
 interface OauthStatePayload {
   nonce: string;
@@ -44,14 +49,15 @@ interface MailboxAuthRow {
   oauth_scope: string | null;
 }
 
-interface GmailAccessTokenResult {
+interface OauthAccessTokenResult {
   accessToken: string;
   accessTokenExpiresAt: string | null;
   tokenRefreshed: boolean;
 }
 
-interface ActiveGmailMailboxRow {
+interface ActiveMailboxRow {
   mailbox_id: string;
+  provider: 'gmail' | 'outlook';
   user_id: string;
   team_id: string;
   role: 'AGENT' | 'TEAM_LEAD';
@@ -74,7 +80,10 @@ interface PullGmailInboxOptions {
   max_results?: number | undefined;
   await_classification?: boolean | undefined;
   preview_limit?: number | undefined;
+  ingest_source?: EmailIngestSource | undefined;
 }
+
+interface PullOutlookInboxOptions extends PullGmailInboxOptions {}
 
 export interface MailboxEmailRecord {
   event_id: string;
@@ -99,11 +108,16 @@ export interface PullGmailInboxResult {
   deduped: number;
   created_or_updated: number;
   lead_count: number;
+  lead_created_count: number;
+  needs_review_count: number;
+  rejected_count: number;
   classification_completed: number;
   classification_queued: number;
   classification_failed: number;
   recent_emails: MailboxEmailRecord[];
 }
+
+export interface PullOutlookInboxResult extends PullGmailInboxResult {}
 
 @Injectable()
 export class MailboxesService implements OnModuleDestroy {
@@ -224,25 +238,25 @@ export class MailboxesService implements OnModuleDestroy {
 
     const decoded = this.decodeOauthState(query.state, provider);
     let gmailAuthData: Awaited<ReturnType<GmailProviderClient['exchangeCodeForMailboxData']>> | null = null;
+    let outlookAuthData: OutlookMailboxAuthData | null = null;
     let providerEmail: string;
     if (provider === 'gmail') {
       gmailAuthData = await this.gmailProviderClient.exchangeCodeForMailboxData(query.code);
       providerEmail = gmailAuthData.email;
     } else {
-      providerEmail = await this.outlookProviderClient.exchangeCodeForEmail(query.code);
+      outlookAuthData = await this.outlookProviderClient.exchangeCodeForMailboxData(query.code);
+      providerEmail = outlookAuthData.email;
     }
 
     const emailAddress = (query.email_address ?? providerEmail).toLowerCase();
     const mailboxType = this.validateMailboxType(query.mailbox_type);
     const delegatedFrom = query.delegated_from ?? null;
-    const encryptedAccessToken = gmailAuthData?.accessToken
-      ? this.rawContentCryptoService.encrypt(gmailAuthData.accessToken)
-      : null;
-    const encryptedRefreshToken = gmailAuthData?.refreshToken
-      ? this.rawContentCryptoService.encrypt(gmailAuthData.refreshToken)
-      : null;
-    const accessTokenExpiresAt = gmailAuthData?.accessTokenExpiresAt ?? null;
-    const oauthScope = gmailAuthData?.scope ?? null;
+    const oauthAccessToken = gmailAuthData?.accessToken ?? outlookAuthData?.accessToken;
+    const oauthRefreshToken = gmailAuthData?.refreshToken ?? outlookAuthData?.refreshToken;
+    const accessTokenExpiresAt = gmailAuthData?.accessTokenExpiresAt ?? outlookAuthData?.accessTokenExpiresAt ?? null;
+    const oauthScope = gmailAuthData?.scope ?? outlookAuthData?.scope ?? null;
+    const encryptedAccessToken = oauthAccessToken ? this.rawContentCryptoService.encrypt(oauthAccessToken) : null;
+    const encryptedRefreshToken = oauthRefreshToken ? this.rawContentCryptoService.encrypt(oauthRefreshToken) : null;
 
     let mailboxConnectionId = uuidv4();
     await this.databaseService.withUserTransaction(
@@ -342,11 +356,7 @@ export class MailboxesService implements OnModuleDestroy {
       provider = check.rows[0].provider;
     });
 
-    if (provider === 'gmail') {
-      await this.gmailProviderClient.backfill(mailboxId);
-    } else {
-      await this.outlookProviderClient.backfill(mailboxId);
-    }
+    this.logger.log(`Queueing mailbox backfill for ${mailboxId} (${provider})`);
 
     await this.queue.add(
       'mailbox-backfill',
@@ -406,9 +416,17 @@ export class MailboxesService implements OnModuleDestroy {
     let classificationCompleted = 0;
     let classificationQueued = 0;
     let classificationFailed = 0;
+    let leadCreatedCount = 0;
+    let needsReviewCount = 0;
+    let rejectedCount = 0;
     const leadIds = new Set<string>();
     for (const email of inboxMessages) {
-      const ingestResult = await this.ingestPulledGmailMessage(mailbox.id, email, options?.await_classification);
+      const ingestResult = await this.ingestPulledGmailMessage(
+        mailbox.id,
+        email,
+        options?.await_classification,
+        options?.ingest_source ?? 'poll'
+      );
       if (ingestResult.accepted) {
         accepted += 1;
       }
@@ -425,6 +443,18 @@ export class MailboxesService implements OnModuleDestroy {
       } else if (ingestResult.classification_status === 'failed') {
         classificationFailed += 1;
       }
+
+      if (ingestResult.accepted && !ingestResult.deduped) {
+        if (ingestResult.intake_decision === 'create_lead') {
+          leadCreatedCount += 1;
+        } else if (ingestResult.intake_decision === 'needs_review') {
+          needsReviewCount += 1;
+        } else if (ingestResult.intake_decision === 'reject') {
+          rejectedCount += 1;
+        } else if (ingestResult.lead_id) {
+          leadCreatedCount += 1;
+        }
+      }
     }
 
     const previewLimit = Math.max(1, Math.min(50, options?.preview_limit ?? 10));
@@ -440,6 +470,95 @@ export class MailboxesService implements OnModuleDestroy {
       deduped,
       created_or_updated: accepted - deduped,
       lead_count: leadIds.size,
+      lead_created_count: leadCreatedCount,
+      needs_review_count: needsReviewCount,
+      rejected_count: rejectedCount,
+      classification_completed: classificationCompleted,
+      classification_queued: classificationQueued,
+      classification_failed: classificationFailed,
+      recent_emails: preview.emails
+    };
+  }
+
+  async pullOutlookInbox(
+    user: UserContext,
+    mailboxId: string,
+    options?: PullOutlookInboxOptions
+  ): Promise<PullOutlookInboxResult> {
+    const mailbox = await this.getMailboxAuthRow(user, mailboxId);
+    if (mailbox.provider !== 'outlook') {
+      throw new BadRequestException('Mailbox provider must be outlook for inbox pull');
+    }
+
+    const token = await this.getValidOutlookAccessToken(user, mailbox);
+    const inboxMessages = await this.outlookProviderClient.fetchInboxForIngestion(token.accessToken, {
+      newerThanHours: options?.newer_than_hours ?? 24,
+      maxResults: options?.max_results ?? 10,
+      mailboxEmail: mailbox.email_address
+    });
+
+    let accepted = 0;
+    let deduped = 0;
+    let classificationCompleted = 0;
+    let classificationQueued = 0;
+    let classificationFailed = 0;
+    let leadCreatedCount = 0;
+    let needsReviewCount = 0;
+    let rejectedCount = 0;
+    const leadIds = new Set<string>();
+    for (const email of inboxMessages) {
+      const ingestResult = await this.ingestPulledOutlookMessage(
+        mailbox.id,
+        email,
+        options?.await_classification,
+        options?.ingest_source ?? 'poll'
+      );
+      if (ingestResult.accepted) {
+        accepted += 1;
+      }
+      if (ingestResult.deduped) {
+        deduped += 1;
+      }
+      if (ingestResult.lead_id) {
+        leadIds.add(ingestResult.lead_id);
+      }
+      if (ingestResult.classification_status === 'completed') {
+        classificationCompleted += 1;
+      } else if (ingestResult.classification_status === 'queued') {
+        classificationQueued += 1;
+      } else if (ingestResult.classification_status === 'failed') {
+        classificationFailed += 1;
+      }
+
+      if (ingestResult.accepted && !ingestResult.deduped) {
+        if (ingestResult.intake_decision === 'create_lead') {
+          leadCreatedCount += 1;
+        } else if (ingestResult.intake_decision === 'needs_review') {
+          needsReviewCount += 1;
+        } else if (ingestResult.intake_decision === 'reject') {
+          rejectedCount += 1;
+        } else if (ingestResult.lead_id) {
+          leadCreatedCount += 1;
+        }
+      }
+    }
+
+    const previewLimit = Math.max(1, Math.min(50, options?.preview_limit ?? 10));
+    const preview = await this.listMailboxEmails(user, mailbox.id, {
+      limit: previewLimit,
+      include_body: false
+    });
+
+    return {
+      mailbox_connection_id: mailbox.id,
+      pulled: inboxMessages.length,
+      accepted,
+      deduped,
+      created_or_updated: accepted - deduped,
+      lead_count: leadIds.size,
+      lead_created_count: leadCreatedCount,
+      needs_review_count: needsReviewCount,
+      rejected_count: rejectedCount,
       classification_completed: classificationCompleted,
       classification_queued: classificationQueued,
       classification_failed: classificationFailed,
@@ -460,18 +579,22 @@ export class MailboxesService implements OnModuleDestroy {
     deduped: number;
     created_or_updated: number;
     lead_count: number;
+    lead_created_count: number;
+    needs_review_count: number;
+    rejected_count: number;
   }> {
     const mailboxLimit = Math.max(1, Math.min(500, options?.mailbox_limit ?? 50));
     const mailboxRows = await this.databaseService.withSystemTransaction(async (client) => {
-      const result = await client.query<ActiveGmailMailboxRow>(
+      const result = await client.query<ActiveMailboxRow>(
         `SELECT
             m.id AS mailbox_id,
+            m.provider,
             u.id AS user_id,
             u.team_id,
             u.role
          FROM "MailboxConnection" m
          JOIN "User" u ON u.id = m.user_id
-         WHERE m.provider = 'gmail'
+         WHERE m.provider IN ('gmail', 'outlook')
            AND m.status = 'active'
          ORDER BY m.updated_at DESC
          LIMIT $1`,
@@ -487,27 +610,34 @@ export class MailboxesService implements OnModuleDestroy {
     let totalAccepted = 0;
     let totalDeduped = 0;
     let totalLeadCount = 0;
+    let totalLeadCreatedCount = 0;
+    let totalNeedsReviewCount = 0;
+    let totalRejectedCount = 0;
 
     for (const mailbox of mailboxRows) {
       try {
-        const result = await this.pullGmailInbox(
-          {
-            userId: mailbox.user_id,
-            teamId: mailbox.team_id,
-            role: mailbox.role
-          },
-          mailbox.mailbox_id,
-          {
-            newer_than_hours: options?.newer_than_hours,
-            max_results: options?.max_results
-          }
-        );
+        const userContext: UserContext = {
+          userId: mailbox.user_id,
+          teamId: mailbox.team_id,
+          role: mailbox.role
+        };
+        const pullOptions = {
+          newer_than_hours: options?.newer_than_hours,
+          max_results: options?.max_results
+        };
+        const result =
+          mailbox.provider === 'gmail'
+            ? await this.pullGmailInbox(userContext, mailbox.mailbox_id, pullOptions)
+            : await this.pullOutlookInbox(userContext, mailbox.mailbox_id, pullOptions);
 
         successfulMailboxes += 1;
         totalPulled += result.pulled;
         totalAccepted += result.accepted;
         totalDeduped += result.deduped;
         totalLeadCount += result.lead_count;
+        totalLeadCreatedCount += result.lead_created_count;
+        totalNeedsReviewCount += result.needs_review_count;
+        totalRejectedCount += result.rejected_count;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'unknown error';
         this.logger.warn(`Failed to pull mailbox ${mailbox.mailbox_id}: ${message}`);
@@ -523,14 +653,18 @@ export class MailboxesService implements OnModuleDestroy {
       accepted: totalAccepted,
       deduped: totalDeduped,
       created_or_updated: totalAccepted - totalDeduped,
-      lead_count: totalLeadCount
+      lead_count: totalLeadCount,
+      lead_created_count: totalLeadCreatedCount,
+      needs_review_count: totalNeedsReviewCount,
+      rejected_count: totalRejectedCount
     };
   }
 
   private async ingestPulledGmailMessage(
     mailboxConnectionId: string,
     email: GmailInboxMessageForIngestion,
-    awaitClassification = false
+    awaitClassification = false,
+    ingestSource: EmailIngestSource = 'poll'
   ): Promise<EmailIngestResult> {
     return this.webhooksService.ingestEmailDetailed(
       'gmail',
@@ -545,7 +679,33 @@ export class MailboxesService implements OnModuleDestroy {
         timestamp: email.timestamp
       },
       {
-        awaitClassification
+        awaitClassification,
+        ingestSource
+      }
+    );
+  }
+
+  private async ingestPulledOutlookMessage(
+    mailboxConnectionId: string,
+    email: OutlookInboxMessageForIngestion,
+    awaitClassification = false,
+    ingestSource: EmailIngestSource = 'poll'
+  ): Promise<EmailIngestResult> {
+    return this.webhooksService.ingestEmailDetailed(
+      'outlook',
+      {
+        provider_event_id: email.provider_event_id,
+        mailbox_connection_id: mailboxConnectionId,
+        from_email: email.from_email,
+        direction: 'inbound',
+        subject: email.subject,
+        body: email.body,
+        thread_id: email.thread_id,
+        timestamp: email.timestamp
+      },
+      {
+        awaitClassification,
+        ingestSource
       }
     );
   }
@@ -596,7 +756,7 @@ export class MailboxesService implements OnModuleDestroy {
     return null;
   }
 
-  private async getValidGmailAccessToken(user: UserContext, mailbox: MailboxAuthRow): Promise<GmailAccessTokenResult> {
+  private async getValidGmailAccessToken(user: UserContext, mailbox: MailboxAuthRow): Promise<OauthAccessTokenResult> {
     const refreshToken = this.decryptToken(mailbox.oauth_refresh_token);
     let accessToken = this.decryptToken(mailbox.oauth_access_token);
     let accessTokenExpiresAt = mailbox.oauth_token_expires_at;
@@ -618,6 +778,37 @@ export class MailboxesService implements OnModuleDestroy {
 
     if (!accessToken) {
       throw new BadRequestException('No Gmail access token available for mailbox');
+    }
+
+    return {
+      accessToken,
+      accessTokenExpiresAt,
+      tokenRefreshed
+    };
+  }
+
+  private async getValidOutlookAccessToken(user: UserContext, mailbox: MailboxAuthRow): Promise<OauthAccessTokenResult> {
+    const refreshToken = this.decryptToken(mailbox.oauth_refresh_token);
+    let accessToken = this.decryptToken(mailbox.oauth_access_token);
+    let accessTokenExpiresAt = mailbox.oauth_token_expires_at;
+    let tokenRefreshed = false;
+
+    if (!accessToken || this.isAccessTokenStale(mailbox.oauth_token_expires_at)) {
+      if (!refreshToken) {
+        throw new BadRequestException(
+          'No Outlook refresh token available. Reconnect Outlook with consent to grant offline access.'
+        );
+      }
+
+      const refreshed = await this.outlookProviderClient.refreshAccessToken(refreshToken);
+      accessToken = refreshed.accessToken;
+      accessTokenExpiresAt = refreshed.accessTokenExpiresAt?.toISOString() ?? null;
+      tokenRefreshed = true;
+      await this.persistMailboxAccessToken(user, mailbox.id, accessToken, refreshed.accessTokenExpiresAt, refreshed.scope);
+    }
+
+    if (!accessToken) {
+      throw new BadRequestException('No Outlook access token available for mailbox');
     }
 
     return {

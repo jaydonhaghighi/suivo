@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@clerk/clerk-expo';
 import Constants from 'expo-constants';
 
 import { apiGet } from './api';
@@ -11,6 +12,11 @@ export type CurrentUser = {
 
 type Role = CurrentUser['role'];
 const UNPROVISIONED_USER_MESSAGE = 'No linked user account found';
+export const CURRENT_USER_QUERY_KEY = ['current-user'] as const;
+
+export function currentUserQueryKey(clerkUserId: string | null | undefined): readonly [string, string] {
+  return [CURRENT_USER_QUERY_KEY[0], clerkUserId ?? 'signed-out'];
+}
 
 function parseRole(value: string | undefined): Role | null {
   if (!value) {
@@ -31,10 +37,12 @@ function getConfiguredDevRole(): Role | null {
 }
 
 export function useCurrentUser(options?: { enabled?: boolean }) {
+  const { isLoaded, isSignedIn, userId } = useAuth();
+  const enabled = (options?.enabled ?? true) && isLoaded && isSignedIn && Boolean(userId);
   const query = useQuery({
-    queryKey: ['current-user'],
+    queryKey: currentUserQueryKey(userId),
     queryFn: () => apiGet<CurrentUser>('/users/me'),
-    enabled: options?.enabled ?? true,
+    enabled,
     staleTime: 60_000,
     retry: 3,
     refetchInterval: 15_000,
