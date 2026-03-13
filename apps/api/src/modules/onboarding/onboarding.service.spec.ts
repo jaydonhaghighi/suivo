@@ -3,6 +3,135 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { OnboardingService } from './onboarding.service';
 
 describe('OnboardingService.register', () => {
+  it('retries team lead registration when join code collision is identified by table/detail fallback', async () => {
+    let teamInsertAttempts = 0;
+    const query = jest.fn().mockImplementation(async (text: string) => {
+      if (text.includes('set_config')) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (text.includes('INSERT INTO "Team"')) {
+        teamInsertAttempts += 1;
+        if (teamInsertAttempts === 1) {
+          const error = Object.assign(new Error('duplicate key value violates unique constraint'), {
+            code: '23505',
+            table: 'Team',
+            detail: 'Key (join_code_hash)=(hash-collision) already exists.'
+          });
+          throw error;
+        }
+        return { rowCount: 1, rows: [] };
+      }
+      if (text.includes('INSERT INTO "User"')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: 'user-retry-fallback', team_id: 'team-retry-fallback', role: 'TEAM_LEAD' }]
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    });
+
+    const db = {
+      query: jest.fn().mockResolvedValue({ rowCount: 0, rows: [] }),
+      withSystemTransaction: async (
+        fn: (client: { query: typeof query }) => Promise<unknown>
+      ) => fn({ query })
+    };
+
+    const teamCodeService = {
+      generate: jest
+        .fn()
+        .mockReturnValueOnce({
+          code: 'TEAMCODE-COLLIDE-FALLBACK',
+          hash: 'hash-collision',
+          encrypted: Buffer.from('cipher-collision')
+        })
+        .mockReturnValueOnce({
+          code: 'TEAMCODE-FRESH-FALLBACK',
+          hash: 'hash-fresh-fallback',
+          encrypted: Buffer.from('cipher-fresh-fallback')
+        }),
+      normalize: jest.fn(),
+      hash: jest.fn(),
+      decrypt: jest.fn()
+    };
+
+    const service = new OnboardingService(db as never, teamCodeService as never);
+    const result = await service.register('clerk-retry-fallback', { role: 'TEAM_LEAD' });
+
+    expect(result).toEqual({
+      user_id: 'user-retry-fallback',
+      team_id: 'team-retry-fallback',
+      role: 'TEAM_LEAD',
+      onboarding_completed: true
+    });
+    expect(teamCodeService.generate).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledWith('ROLLBACK TO SAVEPOINT onboarding_team_lead_attempt');
+  });
+
+  it('retries team lead registration when join code hash collides', async () => {
+    let teamInsertAttempts = 0;
+    const query = jest.fn().mockImplementation(async (text: string) => {
+      if (text.includes('set_config')) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (text.includes('INSERT INTO "Team"')) {
+        teamInsertAttempts += 1;
+        if (teamInsertAttempts === 1) {
+          const error = Object.assign(new Error('duplicate key value violates unique constraint "ux_team_join_code_hash"'), {
+            code: '23505',
+            constraint: 'ux_team_join_code_hash'
+          });
+          throw error;
+        }
+        return { rowCount: 1, rows: [] };
+      }
+      if (text.includes('INSERT INTO "User"')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: 'user-retry', team_id: 'team-retry', role: 'TEAM_LEAD' }]
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    });
+
+    const db = {
+      query: jest.fn().mockResolvedValue({ rowCount: 0, rows: [] }),
+      withSystemTransaction: async (
+        fn: (client: { query: typeof query }) => Promise<unknown>
+      ) => fn({ query })
+    };
+
+    const teamCodeService = {
+      generate: jest
+        .fn()
+        .mockReturnValueOnce({
+          code: 'TEAMCODE-COLLIDE',
+          hash: 'hash-collide',
+          encrypted: Buffer.from('cipher-collide')
+        })
+        .mockReturnValueOnce({
+          code: 'TEAMCODE-FRESH',
+          hash: 'hash-fresh',
+          encrypted: Buffer.from('cipher-fresh')
+        }),
+      normalize: jest.fn(),
+      hash: jest.fn(),
+      decrypt: jest.fn()
+    };
+
+    const service = new OnboardingService(db as never, teamCodeService as never);
+    const result = await service.register('clerk-retry', { role: 'TEAM_LEAD' });
+
+    expect(result).toEqual({
+      user_id: 'user-retry',
+      team_id: 'team-retry',
+      role: 'TEAM_LEAD',
+      onboarding_completed: true
+    });
+    expect(teamCodeService.generate).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledWith('ROLLBACK TO SAVEPOINT onboarding_team_lead_attempt');
+  });
+
   it('creates a team lead, team, and join code', async () => {
     const query = jest.fn().mockImplementation(async (text: string) => {
       if (text.includes('set_config')) {
@@ -202,6 +331,63 @@ describe('OnboardingService.register', () => {
     expect(result).toEqual({
       user_id: 'lead-race',
       team_id: 'team-existing',
+      role: 'TEAM_LEAD',
+      onboarding_completed: true
+    });
+    expect(query).toHaveBeenCalledWith('ROLLBACK TO SAVEPOINT onboarding_team_lead_attempt');
+    expect(query).toHaveBeenCalledWith('RELEASE SAVEPOINT onboarding_team_lead_attempt');
+  });
+
+  it('handles clerk_id unique violation by table/detail fallback during registration race', async () => {
+    const query = jest.fn().mockImplementation(async (text: string) => {
+      if (text.includes('"User"') && text.includes('clerk_id = $1')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: 'lead-race-fallback', team_id: 'team-existing-fallback', role: 'TEAM_LEAD' }]
+        };
+      }
+      if (text.includes('set_config')) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (text.includes('INSERT INTO "Team"')) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (text.includes('INSERT INTO "User"')) {
+        const error = Object.assign(new Error('duplicate key value violates unique constraint'), {
+          code: '23505',
+          table: 'User',
+          detail: 'Key (clerk_id)=(clerk-race-fallback) already exists.'
+        });
+        throw error;
+      }
+
+      return { rowCount: 0, rows: [] };
+    });
+
+    const db = {
+      query: jest.fn().mockResolvedValue({ rowCount: 0, rows: [] }),
+      withSystemTransaction: async (
+        fn: (client: { query: typeof query }) => Promise<unknown>
+      ) => fn({ query })
+    };
+
+    const teamCodeService = {
+      generate: jest.fn().mockReturnValue({
+        code: 'TEAMCODE11-FALLBACK',
+        hash: 'code-hash-2-fallback',
+        encrypted: Buffer.from('cipher-2-fallback')
+      }),
+      normalize: jest.fn(),
+      hash: jest.fn(),
+      decrypt: jest.fn()
+    };
+
+    const service = new OnboardingService(db as never, teamCodeService as never);
+
+    const result = await service.register('clerk-race-fallback', { role: 'TEAM_LEAD' });
+    expect(result).toEqual({
+      user_id: 'lead-race-fallback',
+      team_id: 'team-existing-fallback',
       role: 'TEAM_LEAD',
       onboarding_completed: true
     });
