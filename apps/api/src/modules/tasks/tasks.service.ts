@@ -17,6 +17,7 @@ export class TasksService {
                 t.status,
                 t.type,
                 t.created_at,
+                latest_email.created_at AS mailbox_email_sent_at,
                 l.state AS lead_state,
                 l.primary_email,
                 l.primary_phone,
@@ -25,6 +26,15 @@ export class TasksService {
          FROM "Task" t
          JOIN "Lead" l ON l.id = t.lead_id
          LEFT JOIN "DerivedLeadProfile" d ON d.lead_id = t.lead_id
+         LEFT JOIN LATERAL (
+           SELECT e.created_at
+           FROM "ConversationEvent" e
+           WHERE e.lead_id = t.lead_id
+             AND e.channel = 'email'
+             AND e.direction = 'inbound'
+           ORDER BY e.created_at DESC
+           LIMIT 1
+         ) AS latest_email ON TRUE
          WHERE t.status IN ('open', 'snoozed')
            AND t.owner_id = $1
            AND t.due_at <= now() + interval '24 hours'

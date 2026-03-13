@@ -62,7 +62,10 @@ describe('OutlookProviderClient', () => {
       );
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    await expect(service.exchangeCodeForEmail('oauth-code')).resolves.toBe('owner@example.com');
+    await expect(service.exchangeCodeForMailboxData('oauth-code')).resolves.toMatchObject({
+      email: 'owner@example.com',
+      accessToken: 'ms-access-token'
+    });
   });
 
   it('throws when oauth token response does not include an access token', async () => {
@@ -75,7 +78,7 @@ describe('OutlookProviderClient', () => {
     const fetchMock = jest.fn().mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const promise = service.exchangeCodeForEmail('oauth-code');
+    const promise = service.exchangeCodeForMailboxData('oauth-code');
     await expect(promise).rejects.toBeInstanceOf(BadGatewayException);
     await expect(promise).rejects.toThrow('Microsoft OAuth token response missing access token');
   });

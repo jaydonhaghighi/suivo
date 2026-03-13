@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import {
+  ActivityIndicator,
   Animated,
   Easing,
   LayoutAnimation,
   PanResponder,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -30,6 +32,7 @@ interface TaskCard {
   id: string;
   lead_id: string;
   due_at: string;
+  mailbox_email_sent_at?: string;
   type: string;
   lead_state: string;
   summary?: string;
@@ -52,6 +55,14 @@ function formatDueDate(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return 'Unknown';
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function formatTaskCardTime(task: TaskCard): string {
+  if (task.mailbox_email_sent_at) {
+    return formatDueDate(task.mailbox_email_sent_at);
+  }
+
+  return `Due ${formatDueDate(task.due_at)}`;
 }
 
 function getPrimaryContact(task: TaskCard): string {
@@ -236,7 +247,7 @@ function TaskSwipeCard({
               <View style={[cs.pill, { borderColor: stateColor }]}>
                 <Text style={[cs.pillText, { color: stateColor }]}>{task.lead_state}</Text>
               </View>
-              <Text style={cs.due}>{formatDueDate(task.due_at)}</Text>
+              <Text style={cs.due}>{formatTaskCardTime(task)}</Text>
             </View>
 
             {/* Contact identity */}
@@ -297,6 +308,7 @@ export default function TaskDeckScreen(): JSX.Element {
   const router = useRouter();
   const qc = useQueryClient();
   const [swipeCount, setSwipeCount] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const currentUser = useCurrentUser();
 
   const tasks = useQuery({
@@ -345,6 +357,16 @@ export default function TaskDeckScreen(): JSX.Element {
     day: 'numeric',
   });
 
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await qc.invalidateQueries({ queryKey: ['task-deck'] });
+      await tasks.refetch();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [qc, tasks]);
+
   function openLead(task: TaskCard): void {
     const params: Record<string, string> = {
       id: task.lead_id,
@@ -359,7 +381,20 @@ export default function TaskDeckScreen(): JSX.Element {
 
   return (
     <SafeAreaView style={ss.safeArea} edges={['top']}>
-      <ScrollView contentContainerStyle={ss.container} scrollEnabled={swipeCount === 0}>
+      <ScrollView
+        contentContainerStyle={ss.container}
+        scrollEnabled={swipeCount === 0}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => {
+              void onRefresh();
+            }}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
         {/* Hero */}
         <View style={ss.hero}>
           <View style={ss.heroTop}>
@@ -381,6 +416,13 @@ export default function TaskDeckScreen(): JSX.Element {
             </View>
           </View>
         </View>
+
+        {isRefreshing ? (
+          <View style={ss.refreshRow}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={ss.refreshText}>Refreshing latest emails...</Text>
+          </View>
+        ) : null}
 
       {/* Loading */}
       {tasks.isLoading && (
@@ -636,6 +678,18 @@ function screenStyles(colors: TabThemeColors) {
       color: colors.text,
       fontSize: 18,
       fontWeight: '700',
+    },
+    refreshRow: {
+      marginBottom: spacing.sm,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.xs,
+    },
+    refreshText: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      fontWeight: '600',
     },
     msgCard: {
       borderRadius: 18,
