@@ -1,15 +1,9 @@
 import { Body, Controller, Param, Post } from '@nestjs/common';
-import { z } from 'zod';
 
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { UserContext } from '../../common/auth/user-context';
+import { callIntentSchema } from './calls.schemas';
 import { CallsService } from './calls.service';
-
-const callIntentSchema = z.object({
-  lead_id: z.string().uuid(),
-  phone_number_id: z.string().uuid(),
-  destination: z.string().min(4)
-});
 
 @Controller('calls')
 export class CallsController {

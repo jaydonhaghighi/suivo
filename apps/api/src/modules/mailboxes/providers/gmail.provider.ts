@@ -1,70 +1,17 @@
 import { BadGatewayException, BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-
-interface GmailTokenResponse {
-  access_token?: string | undefined;
-  refresh_token?: string | undefined;
-  expires_in?: number | undefined;
-  scope?: string | undefined;
-  token_type?: string | undefined;
-}
-
-interface GmailUserInfoResponse {
-  email?: string | undefined;
-}
-
-interface GmailOauthUrlOptions {
-  loginHint?: string | undefined;
-}
-
-export interface GmailMailboxAuthData {
-  email: string;
-  accessToken: string;
-  refreshToken?: string | undefined;
-  accessTokenExpiresAt?: Date | undefined;
-  scope?: string | undefined;
-}
-
-interface GmailMessageListResponse {
-  messages?: Array<{ id: string; threadId?: string | undefined }> | undefined;
-  nextPageToken?: string | undefined;
-  resultSizeEstimate?: number | undefined;
-}
-
-interface GmailMessageDetailResponse {
-  id?: string | undefined;
-  threadId?: string | undefined;
-  labelIds?: string[] | undefined;
-  snippet?: string | undefined;
-  internalDate?: string | undefined;
-  payload?: GmailMessagePayloadPart | undefined;
-}
-
-interface GmailMessagePayloadPart {
-  mimeType?: string | undefined;
-  headers?: Array<{ name?: string | undefined; value?: string | undefined }> | undefined;
-  body?: { data?: string | undefined } | undefined;
-  parts?: GmailMessagePayloadPart[] | undefined;
-}
-
-export interface GmailRecentInboxDebugResult {
-  query: {
-    q: string;
-    maxResults: number;
-    includeSpamTrash: boolean;
-  };
-  listResponse: GmailMessageListResponse;
-  messages: GmailMessageDetailResponse[];
-}
-
-export interface GmailInboxMessageForIngestion {
-  provider_event_id: string;
-  from_email: string;
-  subject: string;
-  body: string;
-  thread_id?: string | undefined;
-  timestamp?: string | undefined;
-}
+import {
+  GmailInboxMessageForIngestion,
+  GmailMailboxAuthData,
+  GmailMessageDetailResponse,
+  GmailMessageListResponse,
+  GmailMessagePayloadPart,
+  GmailOauthUrlOptions,
+  GmailRecentInboxDebugResult,
+  GmailTokenResponse,
+  GmailUserInfoResponse
+} from './mailbox-provider.types';
+export type { GmailInboxMessageForIngestion } from './mailbox-provider.types';
 
 @Injectable()
 export class GmailProviderClient {

@@ -5,12 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { DatabaseService } from '../../common/db/database.service';
 import { UserContext } from '../../common/auth/user-context';
 import { LeadsService } from '../leads/leads.service';
-
-interface CallIntentPayload {
-  lead_id: string;
-  phone_number_id: string;
-  destination: string;
-}
+import { CallIntentPayload } from './calls.types';
 
 @Injectable()
 export class CallsService {

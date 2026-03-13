@@ -1,17 +1,9 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { z } from 'zod';
 
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { UserContext } from '../../common/auth/user-context';
+import { notificationFeedQuerySchema, readManySchema } from './notifications.schemas';
 import { NotificationsService } from './notifications.service';
-
-const notificationFeedQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(200).default(80)
-});
-
-const readManySchema = z.object({
-  ids: z.array(z.string().min(1)).max(500).default([])
-});
 
 @Controller('notifications')
 export class NotificationsController {

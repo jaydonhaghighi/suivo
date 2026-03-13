@@ -13,28 +13,20 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { TeamCodeService } from '../../common/auth/team-code.service';
 import { DatabaseService } from '../../common/db/database.service';
-
-interface ExistingUserRow {
-  id: string;
-  team_id: string;
-  role: 'AGENT' | 'TEAM_LEAD';
-}
-
-type RegisterPayload =
-  | { role: 'TEAM_LEAD'; language?: string | undefined }
-  | { role: 'AGENT'; team_code: string; language?: string | undefined };
-
-export interface OnboardingRegisterResult {
-  user_id: string;
-  team_id: string;
-  role: 'AGENT' | 'TEAM_LEAD';
-  onboarding_completed: true;
-}
-
-const DEFAULT_LANGUAGE = 'en';
-const MAX_TEAM_CODE_GENERATION_ATTEMPTS = 10;
-const SAVEPOINT_TEAM_LEAD_ATTEMPT = 'onboarding_team_lead_attempt';
-const SAVEPOINT_AGENT_INSERT = 'onboarding_agent_insert';
+import {
+  isTeamJoinCodeUniqueViolation,
+  isUserClerkIdUniqueViolation
+} from './onboarding-errors';
+import {
+  DEFAULT_LANGUAGE,
+  ExistingUserRow,
+  MAX_TEAM_CODE_GENERATION_ATTEMPTS,
+  OnboardingRegisterResult,
+  OnboardingRole,
+  RegisterPayload,
+  SAVEPOINT_AGENT_INSERT,
+  SAVEPOINT_TEAM_LEAD_ATTEMPT
+} from './onboarding.types';
 
 @Injectable()
 export class OnboardingService {
@@ -103,11 +95,11 @@ export class OnboardingService {
           await client.query(`ROLLBACK TO SAVEPOINT ${SAVEPOINT_TEAM_LEAD_ATTEMPT}`);
           await client.query(`RELEASE SAVEPOINT ${SAVEPOINT_TEAM_LEAD_ATTEMPT}`);
 
-          if (this.isTeamJoinCodeUniqueViolation(error)) {
+          if (isTeamJoinCodeUniqueViolation(error)) {
             continue;
           }
 
-          if (this.isUserClerkIdUniqueViolation(error)) {
+          if (isUserClerkIdUniqueViolation(error)) {
             return this.resolveRaceOnUserInsert(client, clerkId, 'TEAM_LEAD');
           }
 
@@ -131,7 +123,10 @@ export class OnboardingService {
     const teamCodeHash = this.teamCodeService.hash(normalizedCode);
 
     return this.databaseService.withSystemTransaction(async (client) => {
-      await this.applyTeamJoinCodeContext(client, teamCodeHash);
+      await client.query(
+        `SELECT set_config('app.team_join_code_hash', $1, true)`,
+        [teamCodeHash]
+      );
 
       const teamLookup = await client.query<{ id: string }>(
         `SELECT id
@@ -163,7 +158,7 @@ export class OnboardingService {
         await client.query(`ROLLBACK TO SAVEPOINT ${SAVEPOINT_AGENT_INSERT}`);
         await client.query(`RELEASE SAVEPOINT ${SAVEPOINT_AGENT_INSERT}`);
 
-        if (this.isUserClerkIdUniqueViolation(error)) {
+        if (isUserClerkIdUniqueViolation(error)) {
           return this.resolveRaceOnUserInsert(client, clerkId, 'AGENT');
         }
         throw error;
@@ -174,7 +169,7 @@ export class OnboardingService {
   private async resolveRaceOnUserInsert(
     client: PoolClient,
     clerkId: string,
-    expectedRole: 'AGENT' | 'TEAM_LEAD'
+    expectedRole: OnboardingRole
   ): Promise<OnboardingRegisterResult> {
     const existing = await this.findExistingUserByClerkId(clerkId, client);
     if (!existing) {
@@ -215,61 +210,6 @@ export class OnboardingService {
     };
   }
 
-  private isUniqueViolation(error: unknown, constraint: string): boolean {
-    if (!error || typeof error !== 'object') {
-      return false;
-    }
-
-    const pgError = error as { code?: string; constraint?: string };
-    return pgError.code === '23505' && pgError.constraint === constraint;
-  }
-
-  private isUserClerkIdUniqueViolation(error: unknown): boolean {
-    if (!error || typeof error !== 'object') {
-      return false;
-    }
-
-    const pgError = error as {
-      code?: string;
-      constraint?: string;
-      table?: string;
-      detail?: string;
-    };
-
-    if (pgError.code !== '23505') {
-      return false;
-    }
-
-    const knownConstraints = new Set(['ux_user_clerk_id', 'User_clerk_id_key']);
-    if (pgError.constraint && knownConstraints.has(pgError.constraint)) {
-      return true;
-    }
-
-    return (
-      (pgError.table === 'User' || pgError.table === '"User"')
-      && typeof pgError.detail === 'string'
-      && pgError.detail.includes('(clerk_id)')
-    );
-  }
-
-  private isTeamJoinCodeUniqueViolation(error: unknown): boolean {
-    if (this.isUniqueViolation(error, 'ux_team_join_code_hash')) {
-      return true;
-    }
-
-    if (!error || typeof error !== 'object') {
-      return false;
-    }
-
-    const pgError = error as { code?: string; table?: string; detail?: string };
-    return (
-      pgError.code === '23505'
-      && (pgError.table === 'Team' || pgError.table === '"Team"')
-      && typeof pgError.detail === 'string'
-      && pgError.detail.includes('(join_code_hash)')
-    );
-  }
-
   private async applyContext(
     client: PoolClient,
     userId: string,
@@ -282,13 +222,6 @@ export class OnboardingService {
         set_config('app.team_id', $2, true),
         set_config('app.role', $3, true)`,
       [userId, teamId, role]
-    );
-  }
-
-  private async applyTeamJoinCodeContext(client: PoolClient, teamCodeHash: string): Promise<void> {
-    await client.query(
-      `SELECT set_config('app.team_join_code_hash', $1, true)`,
-      [teamCodeHash]
     );
   }
 }

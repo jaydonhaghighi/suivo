@@ -1,28 +1,9 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
-import { z } from 'zod';
 
 import { Public } from '../../common/auth/public.decorator';
 import { InternalService, MailboxBackfillResult } from './internal.service';
+import { mailboxBackfillTriggerSchema, mailSyncTriggerSchema } from './internal.schemas';
 import { InternalTokenGuard } from './internal-token.guard';
-
-const booleanFromBody = z
-  .union([z.boolean(), z.literal('true'), z.literal('false')])
-  .transform((value) => (typeof value === 'boolean' ? value : value === 'true'));
-
-const mailSyncTriggerSchema = z.object({
-  newer_than_hours: z.coerce.number().int().min(1).max(24 * 365).optional(),
-  max_results: z.coerce.number().int().min(1).max(5000).optional(),
-  mailbox_limit: z.coerce.number().int().min(1).max(500).optional()
-});
-
-const mailboxBackfillTriggerSchema = z.object({
-  mailbox_id: z.string().uuid(),
-  newer_than_hours: z.coerce.number().int().min(1).max(24 * 365).optional(),
-  max_results: z.coerce.number().int().min(1).max(5000).optional(),
-  await_classification: booleanFromBody.optional(),
-  preview_limit: z.coerce.number().int().min(1).max(50).optional()
-});
-
 @Controller('internal')
 export class InternalController {
   constructor(private readonly internalService: InternalService) {}

@@ -6,22 +6,7 @@ import { RawContentCryptoService } from '../../common/crypto/raw-content-crypto.
 import { DatabaseService } from '../../common/db/database.service';
 import { UserContext } from '../../common/auth/user-context';
 import { LeadsService } from '../leads/leads.service';
-
-interface EmailReplyPayload {
-  lead_id: string;
-  mailbox_connection_id?: string | undefined;
-  provider_event_id?: string | undefined;
-  thread_id?: string | undefined;
-  subject: string;
-  body: string;
-}
-
-interface SmsSendPayload {
-  lead_id: string;
-  phone_number_id: string;
-  provider_event_id?: string | undefined;
-  body: string;
-}
+import { EmailReplyPayload, SmsSendPayload } from './messages.types';
 
 @Injectable()
 export class MessagesService {

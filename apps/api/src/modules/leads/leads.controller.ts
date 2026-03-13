@@ -6,16 +6,12 @@ import {
   Post,
   Query
 } from '@nestjs/common';
-import { z } from 'zod';
 
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { UserContext } from '../../common/auth/user-context';
 import { Roles } from '../../common/rbac/roles.decorator';
+import { reassignSchema } from './leads.contracts';
 import { LeadsService } from './leads.service';
-
-const reassignSchema = z.object({
-  owner_agent_id: z.string().uuid()
-});
 
 @Controller('leads')
 export class LeadsController {

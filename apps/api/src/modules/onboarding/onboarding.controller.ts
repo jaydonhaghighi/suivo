@@ -13,7 +13,8 @@ import { ZodError } from 'zod';
 
 import { JwtVerifierService } from '../../common/auth/jwt-verifier.service';
 import { Public } from '../../common/auth/public.decorator';
-import { OnboardingRegisterResult, OnboardingService } from './onboarding.service';
+import { OnboardingService } from './onboarding.service';
+import { OnboardingRegisterResult } from './onboarding.types';
 
 @Controller('onboarding')
 @Public()

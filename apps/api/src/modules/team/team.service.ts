@@ -8,60 +8,19 @@ import {
   templateCreateSchema
 } from '@mvp/shared-types';
 import { v4 as uuidv4 } from 'uuid';
-import { z } from 'zod';
 
 import { TeamCodeService } from '../../common/auth/team-code.service';
 import { DatabaseService } from '../../common/db/database.service';
 import { UserContext } from '../../common/auth/user-context';
-
-interface AdminLeadQueueRow {
-  task_id: string | null;
-  lead_id: string;
-  task_type: string | null;
-  task_status: string | null;
-  due_at: string | null;
-  lead_state: string;
-  owner_agent_id: string;
-  primary_email: string | null;
-  primary_phone: string | null;
-  summary: string | null;
-  language: string | null;
-  fields_json: Record<string, unknown> | null;
-  latest_event: Record<string, unknown> | null;
-}
-
-interface AssignableAgentRow {
-  id: string;
-  role: 'AGENT';
-  language: string;
-}
-
-interface AgentLinkRow {
-  id: string;
-  team_id: string;
-  role: 'AGENT' | 'TEAM_LEAD';
-  clerk_id: string | null;
-}
-
-interface TeamJoinCodeRow {
-  join_code_hash: string | null;
-  join_code_encrypted: Buffer | null;
-  join_code_generated_at: string | null;
-}
-
-const assignBrokerTaskSchema = z.object({
-  assignee_user_id: z.string().uuid(),
-  reason: z.string().min(1).max(500)
-});
-
-const linkAgentClerkSchema = z.object({
-  clerk_id: z.string().min(1).max(255)
-});
-
-const teamRuleUpdateSchema = staleRuleSchema
-  .partial()
-  .merge(slaRuleSchema.partial())
-  .merge(z.object({ broker_intake: brokerIntakeRuleSchema.partial().optional() }));
+import {
+  AdminLeadQueueRow,
+  AgentLinkRow,
+  assignBrokerTaskSchema,
+  AssignableAgentRow,
+  linkAgentClerkSchema,
+  teamRuleUpdateSchema,
+  TeamJoinCodeRow
+} from './team.contracts';
 
 @Injectable()
 export class TeamService {
