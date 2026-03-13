@@ -31,7 +31,7 @@
     "infra:vm:restart": "bash scripts/dev/infra-vm.sh restart",
     "infra:vm:tunnel": "bash scripts/dev/infra-vm.sh tunnel",
     "build": "turbo run build",
-    "lint": "turbo run lint",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false turbo run lint",
     "test": "NODE_ENV=test bash scripts/guards/ensure-safe-test-db.sh && turbo run test",
     "typecheck": "turbo run typecheck",
     "checks:fast": "bash scripts/ci/fast-checks.sh",

@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src --ext .ts",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src --ext .ts",
     "test": "echo 'No db unit tests'",
     "migrate": "tsx src/migrate.ts",
     "doctor": "tsx src/doctor.ts",

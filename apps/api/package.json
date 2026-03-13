@@ -7,7 +7,7 @@
     "dev": "nest start --watch --entryFile apps/api/src/main",
     "build": "nest build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src --ext .ts",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src --ext .ts",
     "test": "jest"
   },
   "dependencies": {

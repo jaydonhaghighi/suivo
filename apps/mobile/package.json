@@ -9,7 +9,7 @@
     "dev:lan": "expo start --lan -c",
     "dev:tunnel": "expo start --tunnel -c",
     "build": "expo export",
-    "lint": "eslint . --ext .ts,.tsx",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
     "test": "echo 'No mobile tests yet'",
     "android": "expo run:android",
