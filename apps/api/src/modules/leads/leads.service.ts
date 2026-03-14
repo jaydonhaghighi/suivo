@@ -24,6 +24,8 @@ export class LeadsService {
 
   async getDerivedProfile(user: UserContext, leadId: string): Promise<Record<string, unknown>> {
     return this.databaseService.withUserTransaction(user, async (client) => {
+      await this.getLeadForAccess(client, leadId, user);
+
       const result = await client.query(
         `SELECT d.lead_id, d.summary, d.language, d.fields_json, d.metrics_json, d.updated_at,
                 l.state, l.last_touch_at, l.next_action_at
@@ -43,13 +45,7 @@ export class LeadsService {
 
   async getEventMetadata(user: UserContext, leadId: string): Promise<Record<string, unknown>[]> {
     return this.databaseService.withUserTransaction(user, async (client) => {
-      if (user.role === 'TEAM_LEAD') {
-        const result = await client.query(
-          'SELECT id, channel, type, direction, created_at FROM team_event_metadata($1)',
-          [leadId]
-        );
-        return result.rows;
-      }
+      await this.getLeadForAccess(client, leadId, user);
 
       const result = await client.query(
         `SELECT id, channel, type, direction, created_at
@@ -265,8 +261,11 @@ export class LeadsService {
        FROM "Lead"
        WHERE id = $1
          AND team_id = $2
-         AND ($3 = 'TEAM_LEAD' OR owner_agent_id = $4)`,
-      [leadId, user.teamId, user.role, user.userId]
+         AND (
+           owner_agent_id = $3
+           OR ($4 = 'TEAM_LEAD' AND state = 'Stale')
+         )`,
+      [leadId, user.teamId, user.userId, user.role]
     );
 
     if (!leadResult.rowCount || !leadResult.rows[0]) {

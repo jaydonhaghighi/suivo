@@ -3,7 +3,7 @@ set -euo pipefail
 
 echo "[dev:reset] Stopping docker services..."
 pnpm infra:down >/dev/null 2>&1 || true
-pnpm infra:down:local >/dev/null 2>&1 || true
+pnpm infra:down:local:volumes >/dev/null 2>&1 || pnpm infra:down:local >/dev/null 2>&1 || true
 
 echo "[dev:reset] Stopping local dev processes..."
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

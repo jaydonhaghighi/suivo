@@ -22,6 +22,7 @@
     "infra:up:local": "docker compose up -d postgres redis",
     "infra:down": "docker compose -f docker-compose.dev.yml down",
     "infra:down:local": "docker compose down",
+    "infra:down:local:volumes": "docker compose down -v",
     "infra:logs": "docker compose -f docker-compose.dev.yml logs -f --tail=100 cloud-sql-proxy redis api worker",
     "infra:logs:local": "docker compose logs -f --tail=100 postgres redis",
     "infra:vm:up": "bash scripts/dev/infra-vm.sh up",

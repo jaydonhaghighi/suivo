@@ -124,6 +124,15 @@ async function main(): Promise<void> {
         );
       }
 
+      if (unknownInDb.length > 0) {
+        lines.push(
+          'If these are local-only stale rows, reset local DB volumes and rerun migrations:'
+        );
+        lines.push(
+          '`pnpm infra:down:local:volumes && pnpm infra:up:local && pnpm db:migrate && pnpm db:doctor`'
+        );
+      }
+
       throw new Error(lines.join('\n'));
     }
 

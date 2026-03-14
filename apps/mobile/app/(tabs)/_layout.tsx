@@ -11,7 +11,7 @@ export default function TabsLayout(): JSX.Element {
   const currentUser = useCurrentUser();
   const insets = useSafeAreaInsets();
   const bottomInset = Platform.OS === 'ios' ? Math.max(insets.bottom, 10) : 10;
-  const isTeamLead = currentUser.effectiveRole === 'TEAM_LEAD';
+  const canSeeAdminHub = currentUser.effectiveRole === 'TEAM_LEAD' || currentUser.effectiveRole === 'AGENT';
 
   return (
     <Tabs
@@ -67,7 +67,7 @@ export default function TabsLayout(): JSX.Element {
       <Tabs.Screen name="notifications" options={{ title: 'Alerts' }} />
       <Tabs.Screen name="leads" options={{ title: 'Leads' }} />
       <Tabs.Screen name="metrics" options={{ title: 'Metrics' }} />
-      <Tabs.Screen name="admin-hub" options={{ title: 'Admin', href: isTeamLead ? '/admin-hub' : null }} />
+      <Tabs.Screen name="admin-hub" options={{ title: 'Admin', href: canSeeAdminHub ? '/admin-hub' : null }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>
   );

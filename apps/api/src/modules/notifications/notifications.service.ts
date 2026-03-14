@@ -29,7 +29,10 @@ export class NotificationsService {
            FROM "Lead" l
            LEFT JOIN "DerivedLeadProfile" d ON d.lead_id = l.id
            WHERE l.team_id = $1
-             AND ($2 = 'TEAM_LEAD' OR l.owner_agent_id = $3)
+             AND (
+               l.owner_agent_id = $3
+               OR ($2 = 'TEAM_LEAD' AND l.state = 'Stale')
+             )
          ),
          event_rows AS (
            SELECT

@@ -55,6 +55,58 @@ type AssignmentModalState = {
   actionLabel: string;
 };
 
+type EmailIntakeDecision = 'create_lead' | 'needs_review' | 'reject';
+
+type EmailReviewQueueItem = {
+  intake_id: string;
+  mailbox_connection_id: string;
+  mailbox_email: string;
+  provider: 'gmail' | 'outlook';
+  provider_event_id: string;
+  ingest_source: 'webhook' | 'poll' | 'backfill';
+  sender_email: string;
+  subject: string;
+  score: number;
+  decision: EmailIntakeDecision;
+  decision_reasons: unknown;
+  classifier?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown>;
+  review_assignee_user_id?: string | null;
+  review_status: 'none' | 'review_pending' | 'lead_created' | 'rejected';
+  created_at: string;
+  age_minutes: number;
+  sla_minutes: number;
+  sla_breached: boolean;
+  body?: string;
+  body_preview?: string;
+};
+
+type EmailIntakeReviewQueueResponse = {
+  items: EmailReviewQueueItem[];
+};
+
+type EmailIntakeDailyRow = {
+  day: string;
+  provider: 'gmail' | 'outlook';
+  ingest_source: 'webhook' | 'poll' | 'backfill';
+  intake_count: number;
+  create_lead_count: number;
+  needs_review_count: number;
+  rejected_count: number;
+  pending_review_count: number;
+  avg_score: number | null;
+  shadow_disagreement_count: number;
+};
+
+type EmailIntakeCalibrationResponse = {
+  window_days: number;
+  daily: EmailIntakeDailyRow[];
+  review_backlog: {
+    pending_count: number;
+    oldest_age_minutes: number;
+  };
+};
+
 function formatDue(value: string | null): string {
   if (!value) return 'No due date';
   const date = new Date(value);
@@ -71,12 +123,19 @@ function firstErrorMessage(errors: Array<unknown>): string | null {
   return null;
 }
 
+function formatDecisionLabel(value: EmailIntakeDecision): string {
+  if (value === 'create_lead') return 'Create Lead';
+  if (value === 'needs_review') return 'Needs Review';
+  return 'Reject';
+}
+
 export default function AdminScreen(): JSX.Element {
   const { colors, mode } = useTabTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const queryClient = useQueryClient();
   const currentUser = useCurrentUser();
   const canLoadAdmin = currentUser.effectiveRole === 'TEAM_LEAD';
+  const canLoadIntakeReview = currentUser.effectiveRole === 'TEAM_LEAD' || currentUser.effectiveRole === 'AGENT';
   const [draftByTask, setDraftByTask] = useState<Record<string, AssignDraft>>({});
   const [assignmentModal, setAssignmentModal] = useState<AssignmentModalState | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
@@ -84,6 +143,7 @@ export default function AdminScreen(): JSX.Element {
     assignee_user_id: '',
     reason: ''
   });
+  const [reviewReasonByIntake, setReviewReasonByIntake] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -118,6 +178,22 @@ export default function AdminScreen(): JSX.Element {
     queryFn: () => apiGet<QueueItem[]>('/team/admin/reassign-queue'),
     enabled: canLoadAdmin
   });
+  const emailReviewQueue = useQuery({
+    queryKey: ['email-intake-review-queue'],
+    queryFn: () =>
+      apiGet<EmailIntakeReviewQueueResponse>(
+        '/intake/emails/review-queue?limit=100&include_body=false'
+      ),
+    enabled: canLoadIntakeReview
+  });
+  const emailIntakeCalibration = useQuery({
+    queryKey: ['email-intake-calibration'],
+    queryFn: () =>
+      apiGet<EmailIntakeCalibrationResponse>(
+        '/intake/emails/calibration/daily?days=14'
+      ),
+    enabled: canLoadIntakeReview
+  });
 
   const assignMutation = useMutation({
     mutationFn: (payload: { taskId: string; assigneeUserId: string; reason: string }) =>
@@ -142,13 +218,34 @@ export default function AdminScreen(): JSX.Element {
       setModalDraft({ assignee_user_id: '', reason: '' });
     }
   });
+  const intakeDecisionMutation = useMutation({
+    mutationFn: (payload: { intakeId: string; action: 'approve' | 'reject'; reason?: string }) =>
+      apiPost(`/intake/emails/${payload.intakeId}/${payload.action}`, {
+        reason: payload.reason?.trim() ? payload.reason.trim() : undefined
+      }),
+    onSuccess: async (_data, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['email-intake-review-queue'] }),
+        queryClient.invalidateQueries({ queryKey: ['email-intake-calibration'] }),
+        queryClient.invalidateQueries({ queryKey: ['task-deck'] })
+      ]);
+
+      setReviewReasonByIntake((current) => {
+        const next = { ...current };
+        delete next[variables.intakeId];
+        return next;
+      });
+    }
+  });
 
   const loadError = firstErrorMessage([
     currentUser.effectiveRole ? null : currentUser.error,
     agents.error,
     intakeQueue.error,
     assignedQueue.error,
-    reassignQueue.error
+    reassignQueue.error,
+    emailReviewQueue.error,
+    emailIntakeCalibration.error
   ]);
 
   const agentLabelById = useMemo(() => {
@@ -238,6 +335,25 @@ export default function AdminScreen(): JSX.Element {
       taskId: assignmentModal.taskId,
       assigneeUserId,
       reason
+    });
+  }
+
+  function updateReviewReason(intakeId: string, value: string): void {
+    setReviewReasonByIntake((current) => ({
+      ...current,
+      [intakeId]: value
+    }));
+  }
+
+  function submitIntakeDecision(intakeId: string, action: 'approve' | 'reject'): void {
+    if (intakeDecisionMutation.isPending) {
+      return;
+    }
+
+    intakeDecisionMutation.mutate({
+      intakeId,
+      action,
+      reason: reviewReasonByIntake[intakeId]
     });
   }
 
@@ -379,12 +495,114 @@ export default function AdminScreen(): JSX.Element {
     );
   }
 
+  function renderEmailIntakeReviewCard(): JSX.Element {
+    const items = emailReviewQueue.data?.items ?? [];
+    const backlog = emailIntakeCalibration.data?.review_backlog;
+    const calibrationRows = emailIntakeCalibration.data?.daily.slice(0, 3) ?? [];
+    const decisionError = intakeDecisionMutation.error instanceof Error ? intakeDecisionMutation.error.message : null;
+
+    return (
+      <Card tone={mode}>
+        <Text style={styles.sectionTitle}>Email Intake Review Queue ({items.length})</Text>
+
+        {emailReviewQueue.isLoading || emailIntakeCalibration.isLoading ? (
+          <Text style={styles.meta}>Loading intake review queue…</Text>
+        ) : null}
+
+        {backlog ? (
+          <Text style={styles.meta}>
+            Backlog: {backlog.pending_count} pending · oldest {backlog.oldest_age_minutes}m
+          </Text>
+        ) : null}
+
+        {calibrationRows.map((row) => (
+          <Text key={`${row.day}-${row.provider}-${row.ingest_source}`} style={styles.intakeCalibText}>
+            {row.day} · {row.provider} · {row.ingest_source}: +{row.create_lead_count} / review {row.needs_review_count} / reject {row.rejected_count}
+          </Text>
+        ))}
+
+        {!items.length && !emailReviewQueue.isLoading ? (
+          <Text style={styles.meta}>No pending intake items.</Text>
+        ) : null}
+
+        {items.map((item) => {
+          const reason = reviewReasonByIntake[item.intake_id] ?? '';
+          const pending = intakeDecisionMutation.isPending && intakeDecisionMutation.variables?.intakeId === item.intake_id;
+          const pendingAction = pending ? intakeDecisionMutation.variables?.action : null;
+          const decisionColor =
+            item.decision === 'create_lead'
+              ? colors.accent
+              : item.decision === 'needs_review'
+                ? colors.warning
+                : '#FF7A7A';
+
+          return (
+            <View key={item.intake_id} style={styles.intakeRow}>
+              <View style={styles.intakeTopRow}>
+                <Text style={styles.contact}>{item.sender_email}</Text>
+                <View style={[styles.intakeDecisionPill, { borderColor: decisionColor }]}>
+                  <Text style={[styles.intakeDecisionText, { color: decisionColor }]}>
+                    {formatDecisionLabel(item.decision)}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={styles.summary}>{item.subject || '(No subject)'}</Text>
+              <Text style={styles.meta}>
+                Score {item.score} · Age {item.age_minutes}m · SLA {item.sla_minutes}m
+                {item.sla_breached ? ' · Breached' : ''}
+              </Text>
+              <Text style={styles.meta}>
+                {item.provider.toUpperCase()} · {item.ingest_source} · Mailbox {item.mailbox_email}
+              </Text>
+              {(item.body_preview ?? '').trim().length > 0 ? (
+                <Text style={styles.intakeBodyPreview}>{item.body_preview}</Text>
+              ) : null}
+
+              <TextInput
+                value={reason}
+                onChangeText={(value) => updateReviewReason(item.intake_id, value)}
+                placeholder="Optional decision note"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.input, styles.intakeReasonInput]}
+              />
+
+              <View style={styles.intakeActionRow}>
+                <Pressable
+                  style={[styles.intakeApproveButton, intakeDecisionMutation.isPending ? styles.disabled : null]}
+                  onPress={() => submitIntakeDecision(item.intake_id, 'approve')}
+                  disabled={intakeDecisionMutation.isPending}
+                >
+                  <Text style={styles.intakeApproveText}>
+                    {pendingAction === 'approve' ? 'Approving…' : 'Approve'}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  style={[styles.intakeRejectButton, intakeDecisionMutation.isPending ? styles.disabled : null]}
+                  onPress={() => submitIntakeDecision(item.intake_id, 'reject')}
+                  disabled={intakeDecisionMutation.isPending}
+                >
+                  <Text style={styles.intakeRejectText}>
+                    {pendingAction === 'reject' ? 'Rejecting…' : 'Reject'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          );
+        })}
+
+        {decisionError ? <Text style={styles.error}>Review action failed: {decisionError}</Text> : null}
+      </Card>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.heading}>Admin Routing</Text>
         <Text style={styles.subtitle}>
-          Broker-channel lead assignment and stale reassign workflow.
+          Email intake review plus broker-channel lead assignment and stale reassign workflow.
         </Text>
 
         {currentUser.isLoading && !currentUser.effectiveRole ? (
@@ -393,16 +611,16 @@ export default function AdminScreen(): JSX.Element {
           </Card>
         ) : null}
 
-        {!currentUser.isLoading && currentUser.effectiveRole && !canLoadAdmin ? (
+        {!currentUser.isLoading && currentUser.effectiveRole && !canLoadIntakeReview ? (
           <Card tone={mode}>
-            <Text style={styles.error}>Admin access is restricted to Team Leads.</Text>
+            <Text style={styles.error}>Access is restricted to Agents and Team Leads.</Text>
           </Card>
         ) : null}
 
         {loadError ? (
           <Card tone={mode}>
             <Text style={styles.error}>Unable to load admin data. {loadError}</Text>
-            <Text style={styles.meta}>This screen requires Team Lead access.</Text>
+            <Text style={styles.meta}>This screen requires Agent or Team Lead access.</Text>
           </Card>
         ) : null}
 
@@ -412,11 +630,16 @@ export default function AdminScreen(): JSX.Element {
           </Card>
         ) : null}
 
-        {canLoadAdmin ? (
+        {canLoadIntakeReview ? (
           <>
-            {renderQueueCard('Incoming Broker Queue', intakeQueue.data, true)}
-            {renderQueueCard('Assigned Broker Leads', assignedQueue.data, false)}
-            {renderQueueCard('Stale Reassign Queue', reassignQueue.data, true)}
+            {renderEmailIntakeReviewCard()}
+            {canLoadAdmin ? (
+              <>
+                {renderQueueCard('Incoming Broker Queue', intakeQueue.data, true)}
+                {renderQueueCard('Assigned Broker Leads', assignedQueue.data, false)}
+                {renderQueueCard('Stale Reassign Queue', reassignQueue.data, true)}
+              </>
+            ) : null}
           </>
         ) : null}
       </ScrollView>
@@ -459,6 +682,74 @@ function createStyles(colors: TabThemeColors) {
       backgroundColor: colors.surfaceMuted,
       padding: 12,
       marginBottom: 10
+    },
+    intakeCalibText: {
+      color: colors.textSecondary,
+      marginTop: spacing.xs,
+      fontSize: 12
+    },
+    intakeRow: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceMuted,
+      padding: 12,
+      marginTop: spacing.sm
+    },
+    intakeTopRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: spacing.sm
+    },
+    intakeDecisionPill: {
+      borderRadius: 999,
+      borderWidth: 1,
+      paddingHorizontal: 9,
+      paddingVertical: 3,
+      backgroundColor: colors.surface
+    },
+    intakeDecisionText: {
+      fontSize: 11,
+      fontWeight: '700'
+    },
+    intakeBodyPreview: {
+      color: colors.textSecondary,
+      marginTop: spacing.xs,
+      fontSize: 12,
+      lineHeight: 18
+    },
+    intakeReasonInput: {
+      marginTop: spacing.sm
+    },
+    intakeActionRow: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+      marginTop: spacing.sm
+    },
+    intakeApproveButton: {
+      flex: 1,
+      borderRadius: 10,
+      backgroundColor: colors.accent,
+      paddingVertical: 10,
+      alignItems: 'center'
+    },
+    intakeApproveText: {
+      color: colors.white,
+      fontWeight: '800'
+    },
+    intakeRejectButton: {
+      flex: 1,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingVertical: 10,
+      alignItems: 'center'
+    },
+    intakeRejectText: {
+      color: colors.text,
+      fontWeight: '700'
     },
     contact: {
       color: colors.text,
@@ -506,6 +797,9 @@ function createStyles(colors: TabThemeColors) {
     error: {
       color: '#FF8A8A',
       fontWeight: '700'
+    },
+    disabled: {
+      opacity: 0.6
     },
     modalBackdrop: {
       flex: 1,
