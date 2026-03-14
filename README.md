@@ -290,8 +290,8 @@ Apply in GitHub repository settings:
 
 - `POST /v1/webhooks/email/gmail`
 - `POST /v1/webhooks/email/outlook`
-- `POST /v1/webhooks/twilio/sms`
-- `POST /v1/webhooks/twilio/call`
+- `POST /v1/webhooks/sms`
+- `POST /v1/webhooks/call`
 - `GET /v1/task-deck`
 - `GET /v1/leads/:id/derived`
 - `GET /v1/leads/:id/events/metadata`

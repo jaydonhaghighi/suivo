@@ -35,14 +35,12 @@ export class WebhooksController {
     return this.webhooksService.ingestEmail('outlook', payload);
   }
 
-  @Post('twilio/sms')
-  async twilioSms(
+  @Post('sms')
+  async sms(
     @Body() body: unknown,
-    @Headers('x-webhook-signature') signature?: string,
-    @Headers('x-twilio-signature') twilioSignature?: string
+    @Headers('x-webhook-signature') signature?: string
   ): Promise<{ accepted: boolean; deduped: boolean; lead_id?: string }> {
-    const providedSignature = twilioSignature ?? signature;
-    if (!this.webhooksService.isValidSignature(body, providedSignature)) {
+    if (!this.webhooksService.isValidSignature(body, signature)) {
       throw new ForbiddenException('Invalid webhook signature');
     }
 
@@ -50,14 +48,12 @@ export class WebhooksController {
     return this.webhooksService.ingestSms(payload);
   }
 
-  @Post('twilio/call')
-  async twilioCall(
+  @Post('call')
+  async call(
     @Body() body: unknown,
-    @Headers('x-webhook-signature') signature?: string,
-    @Headers('x-twilio-signature') twilioSignature?: string
+    @Headers('x-webhook-signature') signature?: string
   ): Promise<{ accepted: boolean; deduped: boolean; lead_id?: string }> {
-    const providedSignature = twilioSignature ?? signature;
-    if (!this.webhooksService.isValidSignature(body, providedSignature)) {
+    if (!this.webhooksService.isValidSignature(body, signature)) {
       throw new ForbiddenException('Invalid webhook signature');
     }
 

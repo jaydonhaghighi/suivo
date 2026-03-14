@@ -14,10 +14,6 @@ export const envSchema = z.object({
   LOCAL_ENCRYPTION_KEY_BASE64: z.string().optional(),
   GCP_PROJECT_ID: z.string().optional(),
   GCP_KMS_KEY_NAME: z.string().optional(),
-  TWILIO_ACCOUNT_SID: z.string().optional(),
-  TWILIO_AUTH_TOKEN: z.string().optional(),
-  TWILIO_MESSAGING_SERVICE_SID: z.string().optional(),
-  TWILIO_CALLER_NUMBER: z.string().optional(),
   API_BASE_URL: z.string().url().default('http://localhost:3001')
 });
 

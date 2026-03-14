@@ -238,7 +238,6 @@ CREATE TABLE public."PhoneNumber" (
     status text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT "PhoneNumber_provider_check" CHECK ((provider = 'twilio'::text)),
     CONSTRAINT "PhoneNumber_status_check" CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text, 'error'::text])))
 );
 
@@ -1102,4 +1101,3 @@ CREATE POLICY user_update_policy ON public."User" FOR UPDATE USING (((team_id = 
 --
 
 \unrestrict duoLCCd2pT42jsd2DHGp8dYjIpMHQiBDPUKlExv6UYNnbTA8f0hyIKRd0CR1NO2
-
