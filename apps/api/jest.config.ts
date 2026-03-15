@@ -4,6 +4,7 @@ const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: 'src',
   testRegex: '.*\\.spec\\.ts$',
+  watchman: false,
   moduleNameMapper: {
     '^@mvp/shared-types$': '<rootDir>/../../../packages/shared-types/src/index.ts'
   },

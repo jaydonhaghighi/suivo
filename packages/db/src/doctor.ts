@@ -28,11 +28,9 @@ function buildConnectionHelp(databaseUrl: string, error: unknown): string {
 
     if ((host === '127.0.0.1' || host === 'localhost') && (port === '6432' || port === '5432')) {
       details.push(
-        'This target expects local Postgres for dev. Run `pnpm infra:up:deps` first.'
+        'This target expects local Postgres for dev. Run `pnpm infra:up:local` (or `pnpm infra:up:deps`) first.'
       );
-      details.push(
-        'If you are using Cloud SQL Proxy mode instead, run `pnpm infra:up:prod:deps` and check `pnpm infra:logs:prod`.'
-      );
+      details.push('Then re-run `pnpm db:doctor`.');
     }
   } catch {
     details.push('DATABASE_URL could not be parsed. Verify DATABASE_URL in .env.');
