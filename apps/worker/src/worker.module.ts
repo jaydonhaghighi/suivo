@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { MailSyncJob } from './jobs/mail-sync.job';
 import { RescueSequenceJob } from './jobs/rescue-sequence.job';
 import { StaleDetectionJob } from './jobs/stale-detection.job';
+import { VoiceDispatchJob } from './jobs/voice-dispatch.job';
 import { DatabaseService } from './services/database.service';
 import { QueueBootstrapService } from './services/queue-bootstrap.service';
 import { StaleEvaluatorService } from './services/stale-evaluator.service';
@@ -21,7 +22,8 @@ import { StaleEvaluatorService } from './services/stale-evaluator.service';
     QueueBootstrapService,
     StaleDetectionJob,
     MailSyncJob,
-    RescueSequenceJob
+    RescueSequenceJob,
+    VoiceDispatchJob
   ]
 })
 export class WorkerModule {}

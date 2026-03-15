@@ -1,4 +1,4 @@
-import { brokerIntakeRuleSchema, slaRuleSchema, staleRuleSchema } from '@mvp/shared-types';
+import { brokerIntakeRuleSchema, slaRuleSchema, staleRuleSchema, voiceQualificationRuleSchema } from '@mvp/shared-types';
 import { z } from 'zod';
 
 export interface AdminLeadQueueRow {
@@ -48,4 +48,9 @@ export const linkAgentClerkSchema = z.object({
 export const teamRuleUpdateSchema = staleRuleSchema
   .partial()
   .merge(slaRuleSchema.partial())
-  .merge(z.object({ broker_intake: brokerIntakeRuleSchema.partial().optional() }));
+  .merge(
+    z.object({
+      broker_intake: brokerIntakeRuleSchema.partial().optional(),
+      voice_qualification: voiceQualificationRuleSchema.partial().optional()
+    })
+  );

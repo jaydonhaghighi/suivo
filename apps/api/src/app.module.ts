@@ -22,6 +22,7 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { TeamModule } from './modules/team/team.module';
 import { UsersModule } from './modules/users/users.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { VoiceModule } from './modules/voice/voice.module';
 
 @Module({
   imports: [
@@ -46,7 +47,8 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
     OnboardingModule,
     TeamModule,
     UsersModule,
-    AiModule
+    AiModule,
+    VoiceModule
   ],
   providers: [
     {

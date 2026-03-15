@@ -14,6 +14,7 @@ export class QueueBootstrapService implements OnModuleDestroy {
 
   private readonly staleQueue: Queue;
   private readonly mailSyncQueue: Queue;
+  private readonly voiceDispatchQueue: Queue;
 
   constructor(
     private readonly configService: ConfigService,
@@ -25,6 +26,11 @@ export class QueueBootstrapService implements OnModuleDestroy {
       }
     });
     this.mailSyncQueue = new Queue('mail-sync', {
+      connection: {
+        url: this.configService.getOrThrow<string>('REDIS_URL')
+      }
+    });
+    this.voiceDispatchQueue = new Queue('voice-dispatch', {
       connection: {
         url: this.configService.getOrThrow<string>('REDIS_URL')
       }
@@ -48,6 +54,15 @@ export class QueueBootstrapService implements OnModuleDestroy {
 
     this.logger.log('Recurring stale detection job registered (every 5 minutes)');
     await this.refreshMailSyncScheduler(safeMailSyncEveryMinutes);
+    await this.voiceDispatchQueue.upsertJobScheduler('voice-dispatch-recurring', {
+      every: 60 * 1000
+    }, {
+      name: 'dispatch-due',
+      data: {
+        triggeredBy: 'scheduler'
+      }
+    });
+    this.logger.log('Recurring voice dispatch job registered (every 1 minute)');
 
     this.schedulerRefreshTimer = setInterval(() => {
       void this.refreshMailSyncScheduler(safeMailSyncEveryMinutes);
@@ -63,6 +78,7 @@ export class QueueBootstrapService implements OnModuleDestroy {
 
     await this.staleQueue.close();
     await this.mailSyncQueue.close();
+    await this.voiceDispatchQueue.close();
   }
 
   private async refreshMailSyncScheduler(mailSyncEveryMinutes: number): Promise<void> {

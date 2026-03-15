@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Card } from '../components/card';
-import { apiGet, apiPost } from '../lib/api';
+import { apiGet, apiPost, apiPut } from '../lib/api';
 import { useCurrentUser } from '../lib/current-user';
 import { spacing } from '../lib/theme';
 import { TabThemeColors, useTabTheme } from '../lib/tab-theme';
@@ -55,6 +55,63 @@ type AssignmentModalState = {
   actionLabel: string;
 };
 
+type VoiceMode = 'manual' | 'auto' | 'both';
+type VoiceAssistantProvider = 'telnyx_ai' | 'openai_sip';
+
+type VoiceLabLead = {
+  id: string;
+  state: string;
+  source: string;
+  contact: string | null;
+  primary_phone: string | null;
+  summary: string | null;
+  voice_contact_status: string | null;
+};
+
+type VoiceLabConfig = {
+  timezone: string;
+  voice_qualification: {
+    enabled: boolean;
+    mode: VoiceMode;
+    assistant_provider: VoiceAssistantProvider;
+    assistant_model: string;
+    assistant_voice: string;
+    call_window_start: string;
+    call_window_end: string;
+    quiet_window_start: string;
+    quiet_window_end: string;
+    max_attempts: number;
+    retry_schedule_minutes: number[];
+  };
+  dummy_leads: VoiceLabLead[];
+};
+
+type VoiceLabSession = {
+  id: string;
+  lead_id: string;
+  trigger_mode: 'manual' | 'auto';
+  status: 'queued' | 'dialing' | 'in_progress' | 'completed' | 'failed' | 'opt_out' | 'escalated' | 'unreachable' | 'cancelled';
+  destination_number: string;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at: string | null;
+  summary: string | null;
+  qualification_payload?: {
+    qualification_status?: string;
+    structured_profile?: Record<string, unknown>;
+    recommended_next_action?: string;
+    transcript_status?: string;
+  };
+  error_text: string | null;
+  transcript_available: boolean;
+  transcript_event_id: string | null;
+  lead_state: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 function formatDue(value: string | null): string {
   if (!value) return 'No due date';
   const date = new Date(value);
@@ -84,6 +141,16 @@ export default function AdminScreen(): JSX.Element {
     assignee_user_id: '',
     reason: ''
   });
+  const [selectedVoiceLeadId, setSelectedVoiceLeadId] = useState('');
+  const [voiceDestinationNumber, setVoiceDestinationNumber] = useState('');
+  const [voiceFormError, setVoiceFormError] = useState<string | null>(null);
+  const [transcriptModalSession, setTranscriptModalSession] = useState<VoiceLabSession | null>(null);
+  const [transcriptReason, setTranscriptReason] = useState('');
+  const [transcriptOutput, setTranscriptOutput] = useState<{
+    sessionId: string;
+    transcript: string | null;
+    transcriptStatus: string;
+  } | null>(null);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -118,6 +185,39 @@ export default function AdminScreen(): JSX.Element {
     queryFn: () => apiGet<QueueItem[]>('/team/admin/reassign-queue'),
     enabled: canLoadAdmin
   });
+  const voiceLabConfig = useQuery({
+    queryKey: ['voice-lab-config'],
+    queryFn: () => apiGet<VoiceLabConfig>('/team/admin/voice-lab/config'),
+    enabled: canLoadAdmin
+  });
+  const voiceLabSessions = useQuery({
+    queryKey: ['voice-lab-sessions', selectedVoiceLeadId],
+    queryFn: () =>
+      apiGet<VoiceLabSession[]>(
+        selectedVoiceLeadId
+          ? `/team/admin/voice-lab/sessions?lead_id=${encodeURIComponent(selectedVoiceLeadId)}`
+          : '/team/admin/voice-lab/sessions'
+      ),
+    enabled: canLoadAdmin
+  });
+
+  useEffect(() => {
+    const leads = voiceLabConfig.data?.dummy_leads ?? [];
+    if (!leads.length) {
+      return;
+    }
+
+    if (!selectedVoiceLeadId) {
+      const firstLead = leads[0];
+      if (!firstLead) {
+        return;
+      }
+      setSelectedVoiceLeadId(firstLead.id);
+      if (firstLead.primary_phone) {
+        setVoiceDestinationNumber(firstLead.primary_phone);
+      }
+    }
+  }, [voiceLabConfig.data?.dummy_leads, selectedVoiceLeadId]);
 
   const assignMutation = useMutation({
     mutationFn: (payload: { taskId: string; assigneeUserId: string; reason: string }) =>
@@ -142,13 +242,53 @@ export default function AdminScreen(): JSX.Element {
       setModalDraft({ assignee_user_id: '', reason: '' });
     }
   });
+  const voiceConfigMutation = useMutation({
+    mutationFn: (patch: Partial<VoiceLabConfig['voice_qualification']>) =>
+      apiPut<Record<string, unknown>>('/team/admin/voice-lab/config', patch),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['voice-lab-config'] });
+    }
+  });
+  const voiceSessionMutation = useMutation({
+    mutationFn: (payload: { leadId: string; destinationNumber: string }) =>
+      apiPost<Record<string, unknown>>('/team/admin/voice-lab/sessions', {
+        lead_id: payload.leadId,
+        destination_number: payload.destinationNumber
+      }),
+    onSuccess: async () => {
+      setVoiceFormError(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['voice-lab-sessions'] }),
+        queryClient.invalidateQueries({ queryKey: ['voice-lab-config'] })
+      ]);
+    }
+  });
+  const transcriptMutation = useMutation({
+    mutationFn: (payload: { sessionId: string; reason: string }) =>
+      apiGet<{ transcript: string | null; transcript_status: string }>(
+        `/team/admin/voice-lab/sessions/${payload.sessionId}/transcript?reason=${encodeURIComponent(payload.reason)}`
+      ),
+    onSuccess: (data, variables) => {
+      setTranscriptOutput({
+        sessionId: variables.sessionId,
+        transcript: data.transcript,
+        transcriptStatus: data.transcript_status
+      });
+      setTranscriptModalSession(null);
+      setTranscriptReason('');
+    }
+  });
 
   const loadError = firstErrorMessage([
     currentUser.effectiveRole ? null : currentUser.error,
     agents.error,
     intakeQueue.error,
     assignedQueue.error,
-    reassignQueue.error
+    reassignQueue.error,
+    voiceLabConfig.error,
+    voiceLabSessions.error,
+    voiceSessionMutation.error,
+    voiceConfigMutation.error
   ]);
 
   const agentLabelById = useMemo(() => {
@@ -379,6 +519,283 @@ export default function AdminScreen(): JSX.Element {
     );
   }
 
+  function updateVoiceMode(modeValue: VoiceMode): void {
+    voiceConfigMutation.mutate({ mode: modeValue });
+  }
+
+  function updateVoiceProvider(provider: VoiceAssistantProvider): void {
+    voiceConfigMutation.mutate({ assistant_provider: provider });
+  }
+
+  function toggleVoiceEnabled(): void {
+    const enabled = voiceLabConfig.data?.voice_qualification.enabled ?? true;
+    voiceConfigMutation.mutate({ enabled: !enabled });
+  }
+
+  function onSelectVoiceLead(lead: VoiceLabLead): void {
+    setSelectedVoiceLeadId(lead.id);
+    setVoiceFormError(null);
+    if (lead.primary_phone) {
+      setVoiceDestinationNumber(lead.primary_phone);
+    }
+  }
+
+  function submitVoiceSession(): void {
+    if (!selectedVoiceLeadId) {
+      setVoiceFormError('Pick a lead first, then start the call.');
+      return;
+    }
+
+    const destination = voiceDestinationNumber.trim();
+    if (!destination) {
+      setVoiceFormError('Enter a destination number (example: +14165551234).');
+      return;
+    }
+
+    setVoiceFormError(null);
+
+    voiceSessionMutation.mutate({
+      leadId: selectedVoiceLeadId,
+      destinationNumber: destination
+    });
+  }
+
+  function openTranscriptModal(session: VoiceLabSession): void {
+    setTranscriptModalSession(session);
+    setTranscriptReason('');
+  }
+
+  function closeTranscriptModal(): void {
+    if (transcriptMutation.isPending) {
+      return;
+    }
+    Keyboard.dismiss();
+    setTranscriptModalSession(null);
+    setTranscriptReason('');
+  }
+
+  function submitTranscriptRequest(): void {
+    if (!transcriptModalSession) {
+      return;
+    }
+
+    const reason = transcriptReason.trim();
+    if (!reason) {
+      return;
+    }
+
+    transcriptMutation.mutate({
+      sessionId: transcriptModalSession.id,
+      reason
+    });
+  }
+
+  function renderTranscriptModal(): JSX.Element {
+    const errorMessage = transcriptMutation.error instanceof Error ? transcriptMutation.error.message : null;
+
+    return (
+      <Modal
+        visible={Boolean(transcriptModalSession)}
+        transparent
+        animationType="slide"
+        onRequestClose={closeTranscriptModal}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+        >
+          <Pressable style={styles.modalOverlay} onPress={closeTranscriptModal} />
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>Transcript Access Reason</Text>
+            <Text style={styles.modalMeta}>
+              Team Lead raw transcript access is available only for stale leads.
+            </Text>
+            <Text style={styles.label}>Reason</Text>
+            <TextInput
+              value={transcriptReason}
+              onChangeText={setTranscriptReason}
+              placeholder="Required reason for audit log"
+              placeholderTextColor={colors.textSecondary}
+              style={styles.input}
+              multiline
+            />
+            {errorMessage ? <Text style={styles.error}>Transcript request failed: {errorMessage}</Text> : null}
+            <View style={styles.modalActions}>
+              <Pressable style={styles.modalCancelButton} onPress={closeTranscriptModal} disabled={transcriptMutation.isPending}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={styles.modalSubmitButton}
+                onPress={submitTranscriptRequest}
+                disabled={transcriptMutation.isPending}
+              >
+                <Text style={styles.modalSubmitText}>{transcriptMutation.isPending ? 'Loading…' : 'Open Transcript'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    );
+  }
+
+  function renderVoiceLabCard(): JSX.Element {
+    const config = voiceLabConfig.data?.voice_qualification;
+    const leads = voiceLabConfig.data?.dummy_leads ?? [];
+    const selectedLead = leads.find((lead) => lead.id === selectedVoiceLeadId) ?? null;
+    const sessions = voiceLabSessions.data ?? [];
+    const voiceError = firstErrorMessage([voiceLabConfig.error, voiceLabSessions.error, voiceSessionMutation.error, transcriptMutation.error]);
+    const canStartVoiceSession = Boolean(selectedVoiceLeadId) && Boolean(voiceDestinationNumber.trim());
+
+    return (
+      <Card tone={mode}>
+        <Text style={styles.sectionTitle}>Voice Lab</Text>
+        <Text style={styles.meta}>
+          Mode: {config?.mode ?? 'n/a'} | Enabled: {config?.enabled ? 'yes' : 'no'} | Timezone: {voiceLabConfig.data?.timezone ?? 'UTC'}
+        </Text>
+        <Text style={styles.meta}>
+          Provider: {config?.assistant_provider ?? 'n/a'} | Model: {config?.assistant_model ?? 'n/a'} | Voice: {config?.assistant_voice ?? 'n/a'}
+        </Text>
+        <Text style={styles.meta}>
+          Call window {config?.call_window_start ?? '09:00'}-{config?.call_window_end ?? '20:00'} | Quiet {config?.quiet_window_start ?? '12:00'}-{config?.quiet_window_end ?? '13:30'}
+        </Text>
+
+        <View style={styles.voiceModeRow}>
+          {(['manual', 'auto', 'both'] as VoiceMode[]).map((modeValue) => (
+            <Pressable
+              key={modeValue}
+              style={[
+                styles.voiceModeButton,
+                config?.mode === modeValue ? styles.voiceModeButtonActive : null
+              ]}
+              onPress={() => updateVoiceMode(modeValue)}
+              disabled={voiceConfigMutation.isPending}
+            >
+              <Text style={styles.voiceModeButtonText}>{modeValue.toUpperCase()}</Text>
+            </Pressable>
+          ))}
+          <Pressable
+            style={[styles.voiceModeButton, config?.enabled ? styles.voiceModeButtonActive : null]}
+            onPress={toggleVoiceEnabled}
+            disabled={voiceConfigMutation.isPending}
+          >
+            <Text style={styles.voiceModeButtonText}>{config?.enabled ? 'DISABLE' : 'ENABLE'}</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.voiceModeRow}>
+          {(['openai_sip', 'telnyx_ai'] as VoiceAssistantProvider[]).map((providerValue) => (
+            <Pressable
+              key={providerValue}
+              style={[
+                styles.voiceModeButton,
+                config?.assistant_provider === providerValue ? styles.voiceModeButtonActive : null
+              ]}
+              onPress={() => updateVoiceProvider(providerValue)}
+              disabled={voiceConfigMutation.isPending}
+            >
+              <Text style={styles.voiceModeButtonText}>{providerValue.toUpperCase()}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Text style={styles.label}>Pick Dummy Lead</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.voiceLeadList}>
+          {leads.map((lead) => (
+            <Pressable
+              key={lead.id}
+              style={[
+                styles.voiceLeadChip,
+                selectedVoiceLeadId === lead.id ? styles.voiceLeadChipSelected : null
+              ]}
+              onPress={() => onSelectVoiceLead(lead)}
+            >
+              <Text style={styles.voiceLeadChipText}>{lead.contact ?? lead.id.slice(0, 8)}</Text>
+              <Text style={styles.voiceLeadChipMeta}>{lead.state} · {lead.source}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        {!leads.length ? <Text style={styles.meta}>No leads available in Voice Lab yet.</Text> : null}
+
+        <Text style={styles.meta}>
+          Selected lead: {selectedLead?.contact ?? selectedLead?.id ?? 'None selected'}
+        </Text>
+
+        <Text style={styles.label}>Destination Phone (E.164)</Text>
+        <TextInput
+          value={voiceDestinationNumber}
+          onChangeText={(value) => {
+            setVoiceDestinationNumber(value);
+            if (voiceFormError) {
+              setVoiceFormError(null);
+            }
+          }}
+          placeholder="+15551234567"
+          placeholderTextColor={colors.textSecondary}
+          style={styles.input}
+        />
+        <Pressable
+          style={styles.voiceStartButton}
+          onPress={submitVoiceSession}
+          disabled={voiceSessionMutation.isPending}
+        >
+          <Text style={styles.voiceStartButtonText}>
+            {voiceSessionMutation.isPending ? 'Starting…' : 'Start Manual AI Call'}
+          </Text>
+        </Pressable>
+        {!canStartVoiceSession ? (
+          <Text style={styles.meta}>Select a lead and enter a destination number to start a call.</Text>
+        ) : null}
+        {voiceFormError ? <Text style={styles.error}>{voiceFormError}</Text> : null}
+        {voiceSessionMutation.error instanceof Error ? <Text style={styles.error}>{voiceSessionMutation.error.message}</Text> : null}
+        {voiceError ? <Text style={styles.error}>{voiceError}</Text> : null}
+
+        <Text style={styles.sectionTitle}>Session Timeline ({sessions.length})</Text>
+        {!sessions.length ? <Text style={styles.meta}>No voice sessions yet.</Text> : null}
+        {sessions.map((session) => {
+          const canRequestTranscript = session.lead_state === 'Stale' && session.transcript_available;
+          return (
+            <View key={session.id} style={styles.voiceSessionRow}>
+              <Text style={styles.contact}>Status: {session.status}</Text>
+              <Text style={styles.meta}>
+                Trigger: {session.trigger_mode} | Attempt {session.attempt_count}/{session.max_attempts}
+              </Text>
+              <Text style={styles.meta}>
+                Destination: {session.destination_number} | Lead State: {session.lead_state ?? 'n/a'}
+              </Text>
+              <Text style={styles.meta}>
+                Created: {formatDue(session.created_at)} | Next: {formatDue(session.next_attempt_at)}
+              </Text>
+              {session.summary ? <Text style={styles.summary}>{session.summary}</Text> : null}
+              {session.error_text ? <Text style={styles.error}>Error: {session.error_text}</Text> : null}
+              <View style={styles.voiceSessionActions}>
+                <Pressable
+                  style={[styles.voiceTranscriptButton, canRequestTranscript ? null : styles.voiceTranscriptButtonDisabled]}
+                  onPress={() => openTranscriptModal(session)}
+                  disabled={!canRequestTranscript}
+                >
+                  <Text style={styles.voiceTranscriptButtonText}>
+                    {canRequestTranscript ? 'View Transcript' : 'Transcript (Stale only)'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          );
+        })}
+
+        {transcriptOutput ? (
+          <View style={styles.voiceTranscriptOutput}>
+            <Text style={styles.sectionTitle}>Transcript Output</Text>
+            <Text style={styles.meta}>
+              Session: {transcriptOutput.sessionId} | Status: {transcriptOutput.transcriptStatus}
+            </Text>
+            <Text style={styles.summary}>{transcriptOutput.transcript ?? 'No transcript available.'}</Text>
+          </View>
+        ) : null}
+      </Card>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container}>
@@ -414,6 +831,7 @@ export default function AdminScreen(): JSX.Element {
 
         {canLoadAdmin ? (
           <>
+            {renderVoiceLabCard()}
             {renderQueueCard('Incoming Broker Queue', intakeQueue.data, true)}
             {renderQueueCard('Assigned Broker Leads', assignedQueue.data, false)}
             {renderQueueCard('Stale Reassign Queue', reassignQueue.data, true)}
@@ -421,6 +839,7 @@ export default function AdminScreen(): JSX.Element {
         ) : null}
       </ScrollView>
       {renderAssignModal()}
+      {renderTranscriptModal()}
     </SafeAreaView>
   );
 }
@@ -502,6 +921,103 @@ function createStyles(colors: TabThemeColors) {
     assignButtonText: {
       color: colors.white,
       fontWeight: '800'
+    },
+    voiceModeRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: spacing.sm,
+      marginBottom: spacing.sm,
+      flexWrap: 'wrap'
+    },
+    voiceModeButton: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 8
+    },
+    voiceModeButtonActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.cardMuted
+    },
+    voiceModeButtonText: {
+      color: colors.text,
+      fontSize: 11,
+      fontWeight: '700'
+    },
+    voiceLeadList: {
+      gap: 8,
+      paddingVertical: 8
+    },
+    voiceLeadChip: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      minWidth: 130,
+      backgroundColor: colors.surfaceMuted
+    },
+    voiceLeadChipSelected: {
+      borderColor: colors.primary,
+      backgroundColor: colors.cardMuted
+    },
+    voiceLeadChipText: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 12
+    },
+    voiceLeadChipMeta: {
+      color: colors.textSecondary,
+      fontSize: 11,
+      marginTop: 2
+    },
+    voiceStartButton: {
+      borderRadius: 10,
+      backgroundColor: colors.primary,
+      paddingVertical: 11,
+      alignItems: 'center',
+      marginTop: spacing.sm
+    },
+    voiceStartButtonText: {
+      color: colors.white,
+      fontWeight: '800'
+    },
+    voiceSessionRow: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceMuted,
+      padding: 12,
+      marginTop: spacing.sm
+    },
+    voiceSessionActions: {
+      marginTop: spacing.sm
+    },
+    voiceTranscriptButton: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.surface,
+      paddingVertical: 9,
+      alignItems: 'center'
+    },
+    voiceTranscriptButtonDisabled: {
+      borderColor: colors.border
+    },
+    voiceTranscriptButtonText: {
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: '700'
+    },
+    voiceTranscriptOutput: {
+      marginTop: spacing.md,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 10
     },
     error: {
       color: '#FF8A8A',

@@ -60,10 +60,10 @@ WEB_PID=$!
 
 if [ "$MOBILE_TARGET_RESOLVED" = "device" ]; then
   echo "Starting mobile UI for physical device (Expo Go)..."
-  pnpm --filter @mvp/mobile dev &
+  pnpm --filter @mvp/mobile dev:lan &
 else
   echo "Starting mobile UI in iOS simulator..."
-  pnpm --filter @mvp/mobile dev:ios &
+  pnpm --filter @mvp/mobile dev:ios:clean &
 fi
 MOBILE_PID=$!
 
