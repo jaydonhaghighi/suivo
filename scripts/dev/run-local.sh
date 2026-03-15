@@ -2,6 +2,7 @@
 set -euo pipefail
 
 MOBILE_MODE="${1:-dev:ios}"
+MOBILE_FOREGROUND="${MOBILE_FOREGROUND:-0}"
 
 pnpm --filter @mvp/api dev &
 API_PID=$!
@@ -12,14 +13,26 @@ WORKER_PID=$!
 pnpm --filter @mvp/web-admin dev &
 WEB_PID=$!
 
-pnpm --filter @mvp/mobile "$MOBILE_MODE" &
-MOBILE_PID=$!
-
 cleanup() {
-  kill "$API_PID" "$WORKER_PID" "$WEB_PID" "$MOBILE_PID" >/dev/null 2>&1 || true
+  if [ -n "${MOBILE_PID:-}" ]; then
+    kill "$API_PID" "$WORKER_PID" "$WEB_PID" "$MOBILE_PID" >/dev/null 2>&1 || true
+  else
+    kill "$API_PID" "$WORKER_PID" "$WEB_PID" >/dev/null 2>&1 || true
+  fi
 }
 
 trap cleanup EXIT INT TERM
+
+if [ "$MOBILE_FOREGROUND" = "1" ]; then
+  set +e
+  pnpm --filter @mvp/mobile "$MOBILE_MODE"
+  STATUS=$?
+  set -e
+  exit "$STATUS"
+fi
+
+pnpm --filter @mvp/mobile "$MOBILE_MODE" &
+MOBILE_PID=$!
 
 set +e
 # Bash 3.2 (default on macOS) does not support `wait -n`, so poll for the
