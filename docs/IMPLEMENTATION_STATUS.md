@@ -16,6 +16,6 @@
 
 - Real Gmail incremental sync and historical backfill API calls
 - Real Microsoft Graph incremental sync and historical backfill API calls
-- Real Twilio signature verification and send/call API invocation
+- Real provider signature verification and send/call API invocation
 - Real Cloud KMS envelope key implementation and Cloud Storage signed URLs
 - Production auth provider claim mapping and user provisioning pipeline

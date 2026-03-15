@@ -46,7 +46,7 @@ describe('OutlookProviderClient', () => {
     expect(() => service.createOauthUrl('state-1')).toThrow('MICROSOFT_CLIENT_ID is not configured');
   });
 
-  it('exchanges oauth code and returns normalized user email', async () => {
+  it('exchanges oauth code and returns normalized mailbox auth data', async () => {
     const service = createService({
       MICROSOFT_CLIENT_ID: 'ms-client',
       MICROSOFT_CLIENT_SECRET: 'ms-secret',

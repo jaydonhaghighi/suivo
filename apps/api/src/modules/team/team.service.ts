@@ -5,7 +5,8 @@ import {
   escalationRuleSchema,
   slaRuleSchema,
   staleRuleSchema,
-  templateCreateSchema
+  templateCreateSchema,
+  voiceQualificationRuleSchema
 } from '@mvp/shared-types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -662,9 +663,16 @@ export class TeamService {
             ...override.broker_intake
           })
         : existingEscalation.broker_intake;
+      const nextVoiceQualification = override.voice_qualification
+        ? voiceQualificationRuleSchema.parse({
+            ...existingEscalation.voice_qualification,
+            ...override.voice_qualification
+          })
+        : existingEscalation.voice_qualification;
       const nextEscalationRules = {
         ...existingEscalation,
-        broker_intake: nextBrokerIntake
+        broker_intake: nextBrokerIntake,
+        voice_qualification: nextVoiceQualification
       };
 
       await client.query(

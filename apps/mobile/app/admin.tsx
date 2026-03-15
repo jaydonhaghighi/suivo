@@ -806,6 +806,75 @@ export default function AdminScreen(): JSX.Element {
         {decisionError ? <Text style={styles.error}>Review action failed: {decisionError}</Text> : null}
       </Card>
     );
+  function updateVoiceMode(modeValue: VoiceMode): void {
+    voiceConfigMutation.mutate({ mode: modeValue });
+  }
+
+  function updateVoiceProvider(provider: VoiceAssistantProvider): void {
+    voiceConfigMutation.mutate({ assistant_provider: provider });
+  }
+
+  function toggleVoiceEnabled(): void {
+    const enabled = voiceLabConfig.data?.voice_qualification.enabled ?? true;
+    voiceConfigMutation.mutate({ enabled: !enabled });
+  }
+
+  function onSelectVoiceLead(lead: VoiceLabLead): void {
+    setSelectedVoiceLeadId(lead.id);
+    setVoiceFormError(null);
+    if (lead.primary_phone) {
+      setVoiceDestinationNumber(lead.primary_phone);
+    }
+  }
+
+  function submitVoiceSession(): void {
+    if (!selectedVoiceLeadId) {
+      setVoiceFormError('Pick a lead first, then start the call.');
+      return;
+    }
+
+    const destination = voiceDestinationNumber.trim();
+    if (!destination) {
+      setVoiceFormError('Enter a destination number (example: +14165551234).');
+      return;
+    }
+
+    setVoiceFormError(null);
+
+    voiceSessionMutation.mutate({
+      leadId: selectedVoiceLeadId,
+      destinationNumber: destination
+    });
+  }
+
+  function openTranscriptModal(session: VoiceLabSession): void {
+    setTranscriptModalSession(session);
+    setTranscriptReason('');
+  }
+
+  function closeTranscriptModal(): void {
+    if (transcriptMutation.isPending) {
+      return;
+    }
+    Keyboard.dismiss();
+    setTranscriptModalSession(null);
+    setTranscriptReason('');
+  }
+
+  function submitTranscriptRequest(): void {
+    if (!transcriptModalSession) {
+      return;
+    }
+
+    const reason = transcriptReason.trim();
+    if (!reason) {
+      return;
+    }
+
+    transcriptMutation.mutate({
+      sessionId: transcriptModalSession.id,
+      reason
+    });
   }
 
   function renderTranscriptModal(): JSX.Element {

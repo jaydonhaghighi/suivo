@@ -7,6 +7,7 @@ import {
   InternalServerErrorException,
   Param,
   Post,
+  Query,
   Put
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -15,13 +16,15 @@ import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { UserContext } from '../../common/auth/user-context';
 import { Roles } from '../../common/rbac/roles.decorator';
 import { TeamService } from './team.service';
+import { VoiceService } from '../voice/voice.service';
 
 @Controller('team')
 @Roles('TEAM_LEAD')
 export class TeamController {
   constructor(
     private readonly teamService: TeamService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    private readonly voiceService: VoiceService
   ) {}
 
   @Get('templates')
@@ -128,6 +131,39 @@ export class TeamController {
   @Get('admin/reassign-queue')
   async getAdminReassignQueue(@CurrentUser() user: UserContext): Promise<Record<string, unknown>[]> {
     return this.teamService.getAdminReassignQueue(user);
+  }
+
+  @Get('admin/voice-lab/config')
+  async getVoiceLabConfig(@CurrentUser() user: UserContext): Promise<Record<string, unknown>> {
+    return this.voiceService.getVoiceLabConfig(user);
+  }
+
+  @Put('admin/voice-lab/config')
+  async putVoiceLabConfig(@CurrentUser() user: UserContext, @Body() body: unknown): Promise<Record<string, unknown>> {
+    return this.voiceService.updateVoiceLabConfig(user, body);
+  }
+
+  @Post('admin/voice-lab/sessions')
+  async createVoiceLabSession(@CurrentUser() user: UserContext, @Body() body: unknown): Promise<Record<string, unknown>> {
+    return this.voiceService.createManualVoiceSession(user, body);
+  }
+
+  @Get('admin/voice-lab/sessions')
+  async listVoiceLabSessions(
+    @CurrentUser() user: UserContext,
+    @Query('lead_id') leadId?: string,
+    @Query('limit') limit?: string
+  ): Promise<Record<string, unknown>[]> {
+    return this.voiceService.listVoiceLabSessions(user, { lead_id: leadId, limit });
+  }
+
+  @Get('admin/voice-lab/sessions/:sessionId/transcript')
+  async getVoiceSessionTranscript(
+    @CurrentUser() user: UserContext,
+    @Param('sessionId') sessionId: string,
+    @Query('reason') reason?: string
+  ): Promise<Record<string, unknown>> {
+    return this.voiceService.getVoiceSessionTranscript(user, sessionId, { reason });
   }
 
   @Post('admin/tasks/:taskId/assign')

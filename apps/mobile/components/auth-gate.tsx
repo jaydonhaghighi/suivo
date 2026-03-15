@@ -1,11 +1,12 @@
 import { useAuth, useClerk } from '@clerk/clerk-expo';
 import { useQueryClient } from '@tanstack/react-query';
 import { PropsWithChildren, useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useCurrentUser } from '../lib/current-user';
 import { OnboardingSeed } from '../lib/onboarding';
 import { useTabTheme } from '../lib/tab-theme';
+
 import { OnboardingScreen } from './onboarding-screen';
 import { SignInScreen } from './sign-in-screen';
 import { SignUpScreen } from './sign-up-screen';
@@ -61,7 +62,7 @@ export function AuthGate({ children }: PropsWithChildren): JSX.Element {
       return;
     }
 
-    if (!currentUser.error || hasAttemptedErrorSignOut.current) {
+    if (!currentUser.error || !currentUser.isAuthFailure || hasAttemptedErrorSignOut.current) {
       return;
     }
 
@@ -99,11 +100,25 @@ export function AuthGate({ children }: PropsWithChildren): JSX.Element {
   }
 
   if (currentUser.error) {
+    if (currentUser.isAuthFailure) {
+      return (
+        <View style={styles.centered}>
+          <Text style={styles.errorTitle}>Unable to load account</Text>
+          <Text style={styles.errorBody}>Signing you out and returning to sign in...</Text>
+          <ActivityIndicator color={colors.primary} style={styles.errorSpinner} />
+        </View>
+      );
+    }
+
     return (
       <View style={styles.centered}>
         <Text style={styles.errorTitle}>Unable to load account</Text>
-        <Text style={styles.errorBody}>Signing you out and returning to sign in...</Text>
-        <ActivityIndicator color={colors.primary} style={styles.errorSpinner} />
+        <Text style={styles.errorBody}>
+          {currentUser.error.message || 'Please check your API connection and try again.'}
+        </Text>
+        <Pressable style={styles.retryButton} onPress={() => void currentUser.refetch()}>
+          <Text style={styles.retryButtonText}>Try again</Text>
+        </Pressable>
       </View>
     );
   }
@@ -145,6 +160,17 @@ function createStyles(colors: ReturnType<typeof useTabTheme>['colors']) {
     },
     errorSpinner: {
       marginTop: 16
+    },
+    retryButton: {
+      marginTop: 16,
+      backgroundColor: colors.primary,
+      borderRadius: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 16
+    },
+    retryButtonText: {
+      color: colors.white,
+      fontWeight: '700'
     }
   });
 }

@@ -49,21 +49,21 @@ Mobile-first email/SMS/voice workspace for real estate teams with a Task Deck ex
 
 ### Calling
 
-* Tap-to-call via native dialer using Twilio as routing/proxy (number masking + logging)
+* Tap-to-call via native dialer using provider-based routing/proxy (number masking + logging)
 * Call event logging (direction, time, duration) via provider events
 * Post-call outcome capture
 
 ### SMS (MVP)
 
-* Provisioned business number (Twilio)
+* Provisioned business number (provider-managed)
 * Two-way texting
 * All SMS must be captured in-app (no native Messages app sending)
 
-### 2.1.1 Twilio Numbering + Routing (MVP)
+### 2.1.1 Numbering + Routing (MVP)
 
 * **One business number per Team** for SMS + voice caller ID continuity across agents and reassignment.
 * **SMS is sent only in-app** (no native Messages app sending) to ensure complete capture and policy enforcement.
-* **Calls are always initiated from the app** and routed through Twilio using a **call-through bridge** (agent dials a Twilio access number; Twilio bridges agent <-> lead; logs via webhooks). The “Call” button opens the phone’s native dialer to the Twilio access number / call-through flow.
+* **Calls are always initiated from the app** and routed through a provider using a **call-through bridge** (agent dials an access number; provider bridges agent <-> lead; logs via webhooks). The “Call” button opens the phone’s native dialer to the access number / call-through flow.
 * **Inbound SMS/calls** route to the current Owner Agent by default; Team Lead intervention follows the lead-state privacy model.
 
 ---
@@ -142,7 +142,7 @@ If the lead responds:
 | FR-1  | Email OAuth connect               | Mailbox connects; inbound emails ingest within 1 minute (p95).                    |
 | FR-2  | Lead match or create              | Unknown sender creates new lead; known sender attaches to existing lead.          |
 | FR-3  | Reply from app                    | Thread headers preserved; outbound logs to timeline.                              |
-| FR-4  | Call from app (Twilio-routed)     | Call is initiated via app + Twilio; event logs direction, duration, timestamp.    |
+| FR-4  | Call from app (provider-routed)   | Call is initiated via app + provider; event logs direction, duration, timestamp.  |
 | FR-5  | Post-call outcome                 | 15-second outcome form creates follow-up task and updates last-touch.             |
 | FR-6  | Task Deck                         | Tasks generate correctly; swipe actions persist.                                  |
 | FR-7  | Template library (multi-language) | User can select/edit template; templates persist by language preference.          |
@@ -154,7 +154,7 @@ If the lead responds:
 | FR-13 | Team-configurable SLA + stale     | Team can configure SLA and stale thresholds; defaults are set at team creation.   |
 | FR-14 | Derived profile redaction         | Derived summaries avoid direct quotes by default; PII-safe output enforced.       |
 | FR-15 | Multiple mailbox connections      | Agent can connect personal + corporate mailbox; ingestion + reply works per box.  |
-| FR-16 | Team business number provisioning | Team gets a Twilio number for SMS/voice; inbound routes to owner agent.           |
+| FR-16 | Team business number provisioning | Team gets a business number for SMS/voice; inbound routes to owner agent.         |
 | FR-17 | Basic opt-out guardrails (HITL)   | If a lead is marked DNC for a channel, the UI/API blocks sending on that channel and shows a clear reason. |
 | FR-18 | STOP handling for SMS             | Inbound “STOP” (and common variants) marks SMS as DNC; confirmation message sent; all logged. |
 | FR-19 | Preferred language per lead       | Lead has preferred language (e.g., French/English); templates/AI drafts default accordingly. |

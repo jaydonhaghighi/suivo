@@ -60,7 +60,7 @@ export class CallsService {
           `local-call-intent-${eventId}`,
           JSON.stringify({
             destination: payload.destination,
-            twilio_route: true
+            provider_routed: true
           })
         ]
       );

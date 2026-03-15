@@ -1,8 +1,10 @@
+import 'react-native-reanimated';
+
 import { ClerkLoaded, ClerkProvider, useAuth } from '@clerk/clerk-expo';
 import { tokenCache } from '@clerk/clerk-expo/token-cache';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
-import { useEffect } from 'react';
+import { useLayoutEffect } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
@@ -37,16 +39,27 @@ export default function Layout(): JSX.Element {
 function TokenSync(): null {
   const { getToken } = useAuth();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setTokenProvider(async () => {
-      if (!clerkJwtTemplate) {
-        return null;
+      if (clerkJwtTemplate) {
+        try {
+          const templateToken = await getToken({
+            template: clerkJwtTemplate,
+            skipCache: true
+          });
+          if (templateToken) {
+            return templateToken;
+          }
+        } catch {
+          // Fall through to default Clerk session token.
+        }
       }
 
-      return getToken({
-        template: clerkJwtTemplate,
-        skipCache: true
-      });
+      try {
+        return await getToken({ skipCache: true });
+      } catch {
+        return null;
+      }
     });
   }, [getToken]);
 

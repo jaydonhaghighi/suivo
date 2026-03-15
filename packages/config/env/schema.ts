@@ -10,14 +10,16 @@ export const envSchema = z.object({
   JWT_JWKS_URI: z.string().url(),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default('gpt-4o-mini'),
+  TELNYX_API_KEY: z.string().optional(),
+  TELNYX_API_BASE_URL: z.string().url().default('https://api.telnyx.com/v2'),
+  TELNYX_WEBHOOK_PUBLIC_KEY: z.string().optional(),
+  TELNYX_CONNECTION_ID: z.string().optional(),
+  TELNYX_DEFAULT_ASSISTANT_MODEL: z.string().default('gpt-4o-mini'),
+  TELNYX_DEFAULT_ASSISTANT_VOICE: z.string().default('AWS.Polly.Joanna-Neural'),
   KMS_PROVIDER: z.enum(['local', 'gcp']).default('local'),
   LOCAL_ENCRYPTION_KEY_BASE64: z.string().optional(),
   GCP_PROJECT_ID: z.string().optional(),
   GCP_KMS_KEY_NAME: z.string().optional(),
-  TWILIO_ACCOUNT_SID: z.string().optional(),
-  TWILIO_AUTH_TOKEN: z.string().optional(),
-  TWILIO_MESSAGING_SERVICE_SID: z.string().optional(),
-  TWILIO_CALLER_NUMBER: z.string().optional(),
   API_BASE_URL: z.string().url().default('http://localhost:3001')
 });
 

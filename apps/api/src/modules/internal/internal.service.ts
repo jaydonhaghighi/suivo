@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import { UserContext } from '../../common/auth/user-context';
 import { DatabaseService } from '../../common/db/database.service';
 import { MailboxesService, PullGmailInboxResult, PullOutlookInboxResult } from '../mailboxes/mailboxes.service';
+import { VoiceService } from '../voice/voice.service';
 
 interface MailboxBackfillTargetRow {
   mailbox_id: string;
@@ -40,7 +41,8 @@ export class InternalService implements OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     private readonly databaseService: DatabaseService,
-    private readonly mailboxesService: MailboxesService
+    private readonly mailboxesService: MailboxesService,
+    private readonly voiceService: VoiceService
   ) {
     this.staleQueue = new Queue('stale-detection', {
       connection: {
@@ -62,6 +64,23 @@ export class InternalService implements OnModuleDestroy {
     );
 
     return { queued: true };
+  }
+
+  async triggerVoiceDispatch(options?: {
+    limit?: number | undefined;
+    include_auto?: boolean | undefined;
+  }): Promise<{
+    processed: number;
+    dialed: number;
+    rescheduled: number;
+    failed: number;
+    completed: number;
+    auto_created: number;
+  }> {
+    return this.voiceService.dispatchDueSessions({
+      limit: options?.limit ?? 50,
+      include_auto: options?.include_auto ?? true
+    });
   }
 
   async triggerMailSync(options?: {

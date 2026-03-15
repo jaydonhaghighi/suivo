@@ -15,4 +15,4 @@ RUN pnpm --filter @mvp/shared-types build
 RUN pnpm --filter @mvp/api build
 
 EXPOSE 3001
-CMD ["node", "apps/api/dist/main.js"]
+CMD ["node", "apps/api/dist/apps/api/src/main.js"]

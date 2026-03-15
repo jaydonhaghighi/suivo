@@ -2,7 +2,7 @@ import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 
 import { Public } from '../../common/auth/public.decorator';
 import { InternalService, MailboxBackfillResult } from './internal.service';
-import { mailboxBackfillTriggerSchema, mailSyncTriggerSchema } from './internal.schemas';
+import { mailboxBackfillTriggerSchema, mailSyncTriggerSchema, voiceDispatchTriggerSchema } from './internal.schemas';
 import { InternalTokenGuard } from './internal-token.guard';
 @Controller('internal')
 export class InternalController {
@@ -41,5 +41,20 @@ export class InternalController {
   async mailboxBackfillTrigger(@Body() body: unknown): Promise<MailboxBackfillResult> {
     const payload = mailboxBackfillTriggerSchema.parse(body ?? {});
     return this.internalService.triggerMailboxBackfill(payload);
+  }
+
+  @Public()
+  @UseGuards(InternalTokenGuard)
+  @Post('voice/dispatch-trigger')
+  async voiceDispatchTrigger(@Body() body: unknown): Promise<{
+    processed: number;
+    dialed: number;
+    rescheduled: number;
+    failed: number;
+    completed: number;
+    auto_created: number;
+  }> {
+    const payload = voiceDispatchTriggerSchema.parse(body ?? {});
+    return this.internalService.triggerVoiceDispatch(payload);
   }
 }

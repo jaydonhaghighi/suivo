@@ -39,8 +39,16 @@ describe('InternalService mailbox backfill', () => {
       pullGmailInbox: jest.fn(),
       pullOutlookInbox: jest.fn()
     };
+    const voiceService = {
+      dispatchDueSessions: jest.fn()
+    };
 
-    const service = new InternalService(configService as never, databaseService as never, mailboxesService as never);
+    const service = new InternalService(
+      configService as never,
+      databaseService as never,
+      mailboxesService as never,
+      voiceService as never
+    );
     const result = await service.triggerMailboxBackfill({
       mailbox_id: '8d4f0ee9-3f90-4e6a-b2d6-bc7964a17f6e'
     });
@@ -82,8 +90,16 @@ describe('InternalService mailbox backfill', () => {
         recent_emails: []
       })
     };
+    const voiceService = {
+      dispatchDueSessions: jest.fn()
+    };
 
-    const service = new InternalService(configService as never, databaseService as never, mailboxesService as never);
+    const service = new InternalService(
+      configService as never,
+      databaseService as never,
+      mailboxesService as never,
+      voiceService as never
+    );
     const result = await service.triggerMailboxBackfill({
       mailbox_id: 'f5fd26c3-4574-40dd-8d1f-4a28f2cb95eb'
     });
@@ -140,8 +156,16 @@ describe('InternalService mailbox backfill', () => {
       }),
       pullOutlookInbox: jest.fn()
     };
+    const voiceService = {
+      dispatchDueSessions: jest.fn()
+    };
 
-    const service = new InternalService(configService as never, databaseService as never, mailboxesService as never);
+    const service = new InternalService(
+      configService as never,
+      databaseService as never,
+      mailboxesService as never,
+      voiceService as never
+    );
     const result = await service.triggerMailboxBackfill({
       mailbox_id: '4b9836c5-b628-4256-95ec-ea6bd084a826',
       newer_than_hours: 48,

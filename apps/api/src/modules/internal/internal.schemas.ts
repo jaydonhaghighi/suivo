@@ -17,3 +17,8 @@ export const mailboxBackfillTriggerSchema = z.object({
   await_classification: booleanFromBody.optional(),
   preview_limit: z.coerce.number().int().min(1).max(50).optional()
 });
+
+export const voiceDispatchTriggerSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(250).optional(),
+  include_auto: booleanFromBody.optional()
+});
